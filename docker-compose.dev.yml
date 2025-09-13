@@ -1,0 +1,66 @@
+version: "3.9"
+
+networks:
+  mecare-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redis-cache:
+  redis-insight:
+
+
+services:
+  # Postgres Database
+  user_service_db:
+    image: postgres
+    restart: always
+    ports:
+      - "5133:5432"          # Maps container 5432 to host 5133
+    environment:
+      POSTGRES_DB: users
+      POSTGRES_USER: mecare
+      POSTGRES_PASSWORD: root
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - mecare-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mecare"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:latest
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-cache:/data
+    networks:
+      - mecare-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RedisInsight
+  redis-insight:
+    image: redis/redisinsight:latest
+    restart: always
+    ports:
+      - "5540:5540"
+    environment:
+      RI_HOST: 0.0.0.0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - redis-insight:/data
+    networks:
+      - mecare-network
+
+

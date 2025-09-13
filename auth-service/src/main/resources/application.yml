@@ -1,0 +1,38 @@
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+server:
+  port: 8081
+spring:
+  environments:
+    app-url: http://localhost:3000
+  application:
+    name: auth-service
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://127.0.0.1:5133/users
+    username: mecare
+    password: root
+    jwt-secret: fjdijfdijfidojifdjckxncs[cncknvldkrefinvdkdiifdfdfdkjfdkljlk
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+    baseline-on-migrate: true
+  mail:
+    host: sandbox.smtp.mailtrap.io
+    port: 2525
+    username: d92f76d40050bf
+    password: 1c41e5d7ffc33b
+  cache:
+    type: redis
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
