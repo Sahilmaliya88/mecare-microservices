@@ -9,6 +9,7 @@ import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.authentication.configurers.userdetails.DaoAuthenticationConfigurer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -20,6 +21,7 @@ import org.springframework.security.web.context.RequestAttributeSecurityContextR
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
     @Autowired
     private CustomAuthenticationService customAuthenticationService;
@@ -30,7 +32,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize->authorize.anyRequest().permitAll())
                 .httpBasic(Customizer.withDefaults())
                 .securityContext(context->context.securityContextRepository(new RequestAttributeSecurityContextRepository()))
-                .sessionManagement(sessionManager->sessionManager.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED));
+                .sessionManagement(sessionManager->sessionManager.sessionCreationPolicy(SessionCreationPolicy.NEVER));
         return httpSecurity.build();
     }
     @Bean

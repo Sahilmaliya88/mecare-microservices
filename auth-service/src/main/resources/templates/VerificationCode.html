@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f8fafa;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+        .header {
+            text-align: center;
+            padding-bottom: 10px;
+        }
+        .header img {
+            width: 150px;
+        }
+        .header h1 {
+            font-size: 24px;
+            color: #20b486;
+            margin: 0;
+        }
+
+        .hero {
+            background: linear-gradient(to right, #b2f0e7, #d6f3f0);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .hero h2 {
+            font-size: 20px;
+            margin: 0;
+            color: #0b7c6b;
+        }
+        .hero p {
+            margin: 15px 0 25px;
+            font-size: 16px;
+            line-height: 20px;
+            color: #333;
+        }
+        .button {
+            display: inline-block;
+            background: #20b486;
+            color: white;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        #otpcontainer{
+            all: unset;
+            background: #f8fafa;
+            color: black;
+            margin: 0px auto;
+            border-radius: 5px;
+            cursor:pointer;
+            width: fit-content;
+            padding: 10px 20px;
+            letter-spacing: 10px;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        .info {
+            font-size: 14px;
+            text-align: center;
+            margin-top: 40px;
+            color: #555;
+        }
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 30px;
+        }
+        @media  screen and (max-width: 768px) {
+            .container{
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <img src="https://ik.imagekit.io/tbehxfhlf/logo.png?updatedAt=1748793953345" alt="Mecare Logo"/>
+
+    </div>
+
+    <div class="hero">
+
+        <h2>Verify your email address</h2>
+        <h4 th:text="'Hello '+${email}">Hello {{UserName}},</h4>
+        <p>We’re glad to have you on board. Use the OTP below to complete your registration and start your journey toward better health.</p>
+        <div id="otpcontainer" th:text="${otp}">{{Otp}}</div>
+    </div>
+
+    <div class="info">
+        If you did not sign up for Mecare, you can safely ignore this email.
+    </div>
+
+    <div class="footer">
+        &copy; 2025 Mecare. All rights reserved.
+    </div>
+</div>
+<script>
+    const otpContainer = document.getElementById("otpcontainer");
+    otpContainer.addEventListener("click",(e)=>{
+        const otp = otpContainer.innerText;
+        navigator.clipboard.writeText(otp);
+    })
+</script>
+</body>
+</html>

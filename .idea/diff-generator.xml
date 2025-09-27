@@ -3,5 +3,7 @@
   <component name="DiffGenerationConfig">
     <option name="snapshotDb" value="false" />
     <option name="snapshotModelValue" value="auth-service:auth-service" />
+    <option name="sourceModelValue" value="auth-service:entityManagerFactory" />
+    <option name="targetDbValue" value="c1077b64-512e-4eb3-b0c9-123f408cfc60" />
   </component>
 </project>

@@ -1,13 +1,12 @@
 package com.example.authservice.Entities;
 
+import com.example.authservice.utils.LoginProviders;
 import com.example.authservice.utils.UserRoles;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.*;
 
 import lombok.*;
-
-import org.hibernate.annotations.Type;
 
 import java.util.Date;
 import java.util.UUID;
@@ -34,10 +33,13 @@ public class UserEntity {
     private Boolean isActive = true;
     //created_at
     @Builder.Default
+    @JsonIgnore
     private Date created_at = new Date();
     //updated_at
+    @JsonIgnore
     private Date updated_at;
     //deleted_at
+    @JsonIgnore
     private Date deleted_at;
     @Builder.Default
     private Boolean is_verified = false;
@@ -55,4 +57,10 @@ public class UserEntity {
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private UserRoles role = UserRoles.USER;
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private LoginProviders provider = LoginProviders.EMAIL;
+    @JsonIgnore
+    @Column(columnDefinition = "provider_id")
+    private String providerId;
 }

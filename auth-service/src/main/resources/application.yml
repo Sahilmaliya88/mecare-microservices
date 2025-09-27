@@ -27,6 +27,7 @@ spring:
     port: 2525
     username: d92f76d40050bf
     password: 1c41e5d7ffc33b
+    from-address: mecare@support.com
   cache:
     type: redis
   threads:
@@ -36,3 +37,6 @@ spring:
     redis:
       host: localhost
       port: 6379
+springdoc:
+  swagger-ui:
+    path: /docs

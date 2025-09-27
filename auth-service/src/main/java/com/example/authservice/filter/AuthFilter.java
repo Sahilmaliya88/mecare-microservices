@@ -7,6 +7,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -27,29 +28,22 @@ public class AuthFilter extends OncePerRequestFilter {
 
     @Autowired
     private CustomAuthenticationService customAuthenticationService;
-    @Autowired
-    private EmailService emailService;
-
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+    protected void doFilterInternal(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull FilterChain filterChain) throws ServletException, IOException {
         String userEmail = request.getHeader(EMAIL_HEADER_KEY);
         String userRole = request.getHeader(ROLE_HEADER_KEY);
         String isUserVerified = request.getHeader(VERIFIED_HEADER_KEY);
         if (!isValidHeader(userEmail, userRole, isUserVerified)) {
-            System.out.print("Invalid or missing authentication headers: email="+userEmail + ",role=" +userRole+ ",verified"+
-                    isUserVerified);
             filterChain.doFilter(request, response);
             return;
         }
         //set principal to security context if email present
         UserPrincipal userPrincipal = (UserPrincipal) customAuthenticationService.loadUserByUsername(userEmail);
         if (userPrincipal == null) {
-            System.out.print("User not found:"+ userEmail);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("{\"error\": \"User not found\"}");
             return;
         }
-
         // Create authentication token
         UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(
                 userPrincipal,
@@ -61,7 +55,6 @@ public class AuthFilter extends OncePerRequestFilter {
         // Set authentication in SecurityContext
         SecurityContextHolder.getContext().setAuthentication(authenticationToken);
         filterChain.doFilter(request,response);
-        return;
     }
     /**
      * Validates the presence and non-emptiness of required headers.
