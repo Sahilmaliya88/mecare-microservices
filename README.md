@@ -50,14 +50,13 @@ Here are the main technologies and frameworks you’re (or likely) using:
 |---|---|
 | Language | Java |
 | Framework | Spring Boot (for microservices) |
-| API Gateway | Spring Cloud Gateway / Zuul / equivalent |
-| Service Registry | Spring Cloud Netflix Eureka / Consul / equivalent |
-| Inter-service communication | REST / Feign Clients / HTTP |
+| API Gateway | Spring Cloud Gateway |
+| Service Registry | Spring Cloud Netflix Eureka |
+| Inter-service communication | REST |
 | Containerization | Docker |
 | Orchestration (local) | Docker Compose |
 | Config / Environment | `application.yml` / properties / environment variables |
 
-_(You can adjust this table to match your exact stack)_
 
 ---
 
