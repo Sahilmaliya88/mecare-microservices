@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 
 import org.springframework.http.*;
@@ -49,10 +50,10 @@ public class AuthService {
     private final EmailService emailService;
     private final JWTService jwtService;
     private final PasswordEncoder passwordEncoder;
-    private final RedisTemplate<String,String> redisTemplate;
+    private final RedisTemplate<String,Object> redisTemplate;
     private final AuthenticationManager authenticationManager;
     private final RestTemplate restTemplate;
-    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService, PasswordEncoder passwordEncoder, RedisTemplate<String,String> redisTemplate, AuthenticationManager authenticationManager, RestTemplate restTemplate){
+    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService, PasswordEncoder passwordEncoder, RedisTemplate<String,Object> redisTemplate, AuthenticationManager authenticationManager, RestTemplate restTemplate){
         this.userRepository = userRepository;
         this.emailService = emailService;
         this.jwtService = jwtService;
@@ -351,7 +352,7 @@ public class AuthService {
                 throw new RuntimeException(e);
             }
             String USER_VERSION_KEY = "version-"+user.getEmail();
-            String redisTokenVersion = redisTemplate.opsForValue().get(USER_VERSION_KEY);
+            String redisTokenVersion = (String) redisTemplate.opsForValue().get(USER_VERSION_KEY);
             if(redisTokenVersion == null || redisTokenVersion.isBlank()){
                 return;
             }
@@ -411,7 +412,29 @@ public class AuthService {
             throw new RuntimeException(e);
         }
     }
-
+    public String impersonateUser(String email) throws JsonProcessingException {
+        if(email == null || email.isEmpty()){
+            throw new IllegalArgumentException("Invalid parameters");
+        }
+        UserEntity performer = this.getAuthenticatedUser();
+        if(performer == null){
+            throw new Unauthorize("Please login before perform this action");
+        }
+        if(performer.getRole() != UserRoles.ADMIN && performer.getRole() != UserRoles.SUPER_ADMIN){
+            throw new Unauthorize("You can not impersonate any user");
+        }
+        UserEntity targetUser = userRepository.findByEmail(email)
+                .orElseThrow(()-> new UserNotfoundException("User not found with email:"+email));
+        if(targetUser.getRole().getRank() < performer.getRole().getRank()){
+            throw new Unauthorize("You can not impersonate your superior");
+        }
+        long tokenVersion = ThreadLocalRandom.current().nextLong();
+        String updatedToken = jwtService.getJwtToken(targetUser,performer.getEmail(),Long.toString(tokenVersion));
+        ListOperations<String,Object> listOps = redisTemplate.opsForList();
+        String Key = "impersonate-"+targetUser.getEmail();
+        listOps.rightPush(Key,Long.toString(tokenVersion));
+        return updatedToken;
+    }
     /**
      * converts valid csv record to UserEntity
      * @param record {@link CSVRecord} a record containing email and password

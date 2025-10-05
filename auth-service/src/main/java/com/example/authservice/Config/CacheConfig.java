@@ -24,8 +24,8 @@ public class CacheConfig {
         return RedisCacheManager.builder(connectionFactory).cacheDefaults(cacheConfiguration).build();
     }
     @Bean
-    public RedisTemplate<?,?> redisTemplate(RedisConnectionFactory connectionFactory){
-        RedisTemplate<?,?> template = new RedisTemplate<>();
+    public RedisTemplate<String,Object> redisTemplate(RedisConnectionFactory connectionFactory){
+        RedisTemplate<String,Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.setHashKeySerializer(new StringRedisSerializer());
         template.setKeySerializer(new StringRedisSerializer());

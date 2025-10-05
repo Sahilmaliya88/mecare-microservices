@@ -43,7 +43,28 @@ public class JWTService {
                 .compact();
 
     }
-
+    public String getJwtToken(UserEntity tagetUser,String email,String version) throws JsonProcessingException {
+        if(tagetUser.getEmail() == null || tagetUser.getRole() == null || tagetUser.getIs_verified() == null || email == null || version == null){
+            throw new NullPointerException("Missing token data from generate token");
+        }
+        ObjectMapper objectMapper = new ObjectMapper();
+        Date expiryDate = new Date(new Date().getTime() + 7*24*60*60*1000);
+        Map<String,Object> jwtContent = Map.of(
+                "impersonate",true,
+                "email",tagetUser.getEmail(),
+                "verified",tagetUser.getIs_verified(),
+                "role",tagetUser.getRole().toString(),
+                "version",version,
+                "impersonate_by",email
+        );
+        String subject = objectMapper.writeValueAsString(jwtContent);
+        return Jwts.builder()
+                .subject(subject)
+                .expiration(expiryDate)
+                .issuedAt(new Date())
+                .signWith(jwtSignInKey())
+                .compact();
+    }
     public Map<String,Object> getJwtClaims(String jwtToken) throws JsonProcessingException {
         ObjectMapper objectMapper = new ObjectMapper();
         Claims claims = Jwts.parser()

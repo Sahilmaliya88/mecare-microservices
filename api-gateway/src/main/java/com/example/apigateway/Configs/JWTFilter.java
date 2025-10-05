@@ -35,11 +35,15 @@ public class JWTFilter implements Ordered {
     private static final String VERSION_KEY_PREFIX = "version-";
     private static final String VERSION_CLAIM_KEY = "version";
     private static final String ROLE_CLAIM_KEY ="role";
+    private static final String IMPERSONATE_CLAIM_KEY ="impersonate";
+    private static final String IMPERSONATE_BY_CLAIM_KEY = "impersonate_by";
     private static final String VERIFIED_CLAIM_KEY = "verified";
     private static final String EMAIL_HEADER_KEY= "x-user-email";
     private static final String ROLE_HEADER_KEY = "x-user-role";
     private static final String VERIFIED_HEADER_KEY = "x-user-verified";
-    private final RedisTemplate<String, String> redisTemplate;
+    private static final String IMPERSONATE_BY = "x-user-impersonate_by";
+    private static final String IMPERSONATE = "x-user-impersonate";
+    private final RedisTemplate<String, Object> redisTemplate;
     private final JwtService jwtService;
 
     /**
@@ -63,10 +67,32 @@ public class JWTFilter implements Ordered {
                 String email = (String) claims.get(EMAIL_CLAIM_KEY);
                 String version = (String) claims.get(VERSION_CLAIM_KEY);
                 String role = (String) claims.get(ROLE_CLAIM_KEY);
-                System.out.println(role);
+                boolean impersonate = Boolean.TRUE.equals(claims.get(IMPERSONATE_CLAIM_KEY));;
+                String impersonateBy = (String) claims.get(IMPERSONATE_BY_CLAIM_KEY);
                 Boolean verified = (Boolean) claims.get(VERIFIED_CLAIM_KEY);
                 if (email == null || verified == null || role == null || version == null) {
                     return handleErrorResponse(exchange,HttpStatus.BAD_REQUEST,"Token is corrupted");
+                } else if (impersonate) {
+                    List<Object> impersonateVersions = redisTemplate.opsForList().range("impersonate-"+email,0,-1);
+                    if (impersonateVersions == null || impersonateVersions.isEmpty()) {
+                        throw new RuntimeException("Invalid token version");
+                    }
+
+                    boolean exists = impersonateVersions.stream()
+                            .map(Object::toString)
+                            .anyMatch(v -> v.equals(version.toString()));
+
+                    if (!exists) {
+                        throw new RuntimeException("Invalid params");
+                    }
+                    ServerHttpRequest modifiedRequest = request.mutate()
+                            .header(EMAIL_HEADER_KEY,email)
+                            .header(ROLE_HEADER_KEY,role)
+                            .header(VERIFIED_HEADER_KEY,Boolean.toString(verified))
+                            .header(IMPERSONATE,Boolean.toString(true))
+                            .header(IMPERSONATE_BY,impersonateBy)
+                            .build();
+                    return chain.filter(exchange.mutate().request(modifiedRequest).build());
                 } else {
                     String storedVersionRaw = extractTokenVersionFromRedis(email);
                     String storedVersion;
@@ -128,7 +154,7 @@ public class JWTFilter implements Ordered {
     private String extractTokenVersionFromRedis(String email){
         try{
             String tokenVersionKey =VERSION_KEY_PREFIX+email;
-            return redisTemplate.opsForValue().get(tokenVersionKey);
+            return Objects.requireNonNull(redisTemplate.opsForValue().get(tokenVersionKey)).toString();
         } catch (RedisConnectionFailureException e) {
             throw new RuntimeException(e.getMessage());
         }

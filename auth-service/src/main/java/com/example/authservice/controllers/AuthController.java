@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -146,6 +147,13 @@ public class AuthController {
         log.info("received file with name {}",request.getFile().getOriginalFilename());
         int insertedRecord = authService.insertUsers(request);
         Map<String,Object> response = Map.of("status",true,"message","data inserted successfully","total",insertedRecord);
+        return ResponseEntity.ok(response);
+    }
+    @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN')")
+    @GetMapping("/{email}/impersonate")
+    public ResponseEntity<Map<String,Object>> impersonateUser(@PathVariable @Email String email) throws JsonProcessingException {
+        String token = authService.impersonateUser(email);
+        Map<String,Object> response = Map.of("status",true,"token",token);
         return ResponseEntity.ok(response);
     }
 }
