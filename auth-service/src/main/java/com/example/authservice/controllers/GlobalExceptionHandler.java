@@ -19,13 +19,27 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity handleDefaultException(HttpServletRequest request,Exception e){
-        return  ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("status",false,"message",e.getMessage()));
+        String message = e.getCause() != null ? e.getCause().getMessage():e.getMessage();
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                Map.of(
+                        "status", false,
+                        "error", "Unexpected error!",
+                        "message",message,
+                        "path", request.getRequestURI()
+                )
+        );
     }
     @ExceptionHandler(NullPointerException.class)
     public ResponseEntity<Map<String,Object>> handleNullPointerException(HttpServletRequest request,NullPointerException e){
         String message = e.getCause() != null ? e.getCause().getMessage():e.getMessage();
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("status",false,"message",message));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                Map.of(
+                        "status", false,
+                        "error", "null pointer!",
+                        "message",message,
+                        "path", request.getRequestURI()
+                )
+        );
     }
     @ExceptionHandler(SQLException.class)
     public ResponseEntity<Map<String, Object>> handleDuplicateKeyException(
@@ -123,6 +137,18 @@ public class GlobalExceptionHandler {
                 Map.of(
                         "status", false,
                         "error", "Failed to fetch data!",
+                        "message",message,
+                        "path", request.getRequestURI()
+                )
+        );
+    }
+    @ExceptionHandler(AuthService.SameUserException.class)
+    public ResponseEntity<Map<String,Object>> handleSameUserException(HttpServletRequest request, AuthService.SameUserException e){
+        String message = e.getCause() != null ? e.getCause().getMessage():e.getMessage();
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                Map.of(
+                        "status", false,
+                        "error", "Same user found!",
                         "message",message,
                         "path", request.getRequestURI()
                 )

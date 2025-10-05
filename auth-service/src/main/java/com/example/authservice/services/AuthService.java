@@ -3,10 +3,14 @@ import com.example.authservice.DTOS.*;
 import com.example.authservice.Entities.UserEntity;
 import com.example.authservice.repositories.UserRepository;
 import com.example.authservice.utils.LoginProviders;
+import com.example.authservice.utils.UserPrincipal;
 import com.example.authservice.utils.UserRoles;
 import com.example.authservice.utils.exceptions.Unauthorize;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.redis.core.RedisTemplate;
 
 import org.springframework.http.*;
@@ -16,15 +20,22 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.lang.reflect.Array;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 
 @Slf4j
@@ -37,13 +48,15 @@ public class AuthService {
     private final UserRepository userRepository;
     private final EmailService emailService;
     private final JWTService jwtService;
+    private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String,String> redisTemplate;
     private final AuthenticationManager authenticationManager;
     private final RestTemplate restTemplate;
-    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService, RedisTemplate<String,String> redisTemplate,AuthenticationManager authenticationManager,RestTemplate restTemplate){
+    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService, PasswordEncoder passwordEncoder, RedisTemplate<String,String> redisTemplate, AuthenticationManager authenticationManager, RestTemplate restTemplate){
         this.userRepository = userRepository;
         this.emailService = emailService;
         this.jwtService = jwtService;
+        this.passwordEncoder = passwordEncoder;
         this.redisTemplate = redisTemplate;
         this.authenticationManager = authenticationManager;
         this.restTemplate = restTemplate;
@@ -255,9 +268,13 @@ public class AuthService {
             GoogleUserProfileResponse googleProfile = googleProfileResponse.getBody();
             log.info("successfully user profile retrieved of: {}",googleProfile.getFamily_name());
             //check user exists
+            if(googleProfile.getEmail() == null || googleProfile.getEmail().isBlank()){
+                throw new IllegalArgumentException("Email is missing from goole response");
+            }
             Optional<UserEntity> optionalUser = userRepository.findByEmail(googleProfile.getEmail());
             if(optionalUser.isPresent()){
                 UserEntity user = optionalUser.get();
+                log.info("optional user from database {}",user.getEmail());
                 //throws error if provider is different
                 if(user.getProvider() != LoginProviders.GOOGLE){
                     throw new InvalidLoginTypeException("Please login with "+user.getProvider());
@@ -301,6 +318,140 @@ public class AuthService {
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
+    }
+    /**
+     * Changes user roles
+     * @param changeUserRoleRequest the request body {@link ChangeUserRoleRequest}
+     */
+    public void changeUserRole(ChangeUserRoleRequest changeUserRoleRequest){
+        UserEntity operator = getAuthenticatedUser();
+        if(operator == null){
+            throw new Unauthorize("Please login!");
+        }
+        if(operator.getEmail().equals(changeUserRoleRequest.getEmail())){
+            throw new SameUserException("You can not change own role");
+        }
+        log.info("operator rank is {}",operator.getRole().getRank());
+        try {
+            if(operator.getRole() == null || operator.getRole().equals(UserRoles.USER) || operator.getRole().equals(UserRoles.DOCTOR)){
+                throw new Unauthorize("You don't have permission to perform this action");
+            }
+            //fetch user
+            UserEntity user = userRepository.findByEmail(changeUserRoleRequest.getEmail())
+                    .orElseThrow(()->new UserNotfoundException("User not found with this email"));
+            boolean isPermitted = checkUserCanChangeRole(operator.getRole(),user.getRole(),changeUserRoleRequest.getUserRole());
+            if(!isPermitted){
+                throw new Unauthorize("you are unauthorized to perform this action");
+            }
+            user.setRole(changeUserRoleRequest.getUserRole());
+            user.setUpdated_at(new Date());
+            try {
+                userRepository.save(user);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            String USER_VERSION_KEY = "version-"+user.getEmail();
+            String redisTokenVersion = redisTemplate.opsForValue().get(USER_VERSION_KEY);
+            if(redisTokenVersion == null || redisTokenVersion.isBlank()){
+                return;
+            }
+            int dashIndex = redisTokenVersion.indexOf("-");
+            String updatedTokenForUser;
+            if(dashIndex !=1 && dashIndex == redisTokenVersion.length()-2){
+                updatedTokenForUser = redisTokenVersion.substring(0,dashIndex)+"-"+user.getRole().getRank();
+            }else{
+                updatedTokenForUser = redisTokenVersion+"-"+user.getRole().getRank();
+            }
+            try {
+                redisTemplate.opsForValue().set(USER_VERSION_KEY,updatedTokenForUser);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+    }
+
+    /**
+     * Process the CSV files from the request and Insert to the database
+     * @param request {@link UploadCsvRequest} object containing CSV file
+     * @return {@link Integer} total number of inserted records
+     * @throws IllegalArgumentException if file is invalid of empty
+     * @throws RuntimeException if database operation fails
+     */
+    public int insertUsers(UploadCsvRequest request){
+        MultipartFile file = request.getFile();
+        if(file == null || file.isEmpty()){
+            throw new IllegalArgumentException("Please enter valid file");
+        }
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
+            CSVFormat csvFormat = CSVFormat.
+                    DEFAULT
+                    .builder()
+                    .setHeader()
+                    .setSkipHeaderRecord(true)
+                    .setIgnoreHeaderCase(true)
+                    .setTrim(true)
+                    .build();
+            CSVParser csvRecord = csvFormat.parse(reader);
+            List<UserEntity> users = csvRecord.stream()
+                    .filter(record -> record.get("email") != null || !record.get("email").isEmpty())
+                    .map(this::insertUser)
+                    .toList();
+            try {
+                userRepository.saveAll(users);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            return users.size();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * converts valid csv record to UserEntity
+     * @param record {@link CSVRecord} a record containing email and password
+     * @return {@link UserEntity} an userEntity
+     */
+    private UserEntity insertUser(CSVRecord record){
+        String email = record.get("email");
+        String password = record.get("password");
+        if(email == null || email.isBlank()){
+            return null;
+        }
+       String decodedPassword = passwordEncoder.encode(password);
+        return UserEntity.builder()
+                .email(email)
+                .password(decodedPassword)
+                .is_verified(true)
+                .created_at(new Date())
+                .isActive(true)
+                .provider(LoginProviders.EMAIL)
+                .build();
+    }
+    /**
+     * Check role hierarchy that is performer is superior to target role and current user role
+     * @param performerRole - {@link UserRoles} role of Action performer
+     * @param currentUserRole - {@link UserRoles} current role user
+     * @param targetRole - {@link UserRoles} target role
+     * @return true if performer is superior else false
+     * @throws IllegalArgumentException if any function parameters are invalid
+     */
+    public boolean checkUserCanChangeRole(UserRoles performerRole,UserRoles currentUserRole,UserRoles targetRole){
+        if(performerRole == null || currentUserRole == null || targetRole == null){
+            throw new IllegalArgumentException("Invalid parameter to perform this action");
+        }
+        int indexOfPerformerRole = performerRole.getRank();
+        int indexOfUserRole = currentUserRole.getRank();
+        int indexOfRoleToChange = targetRole.getRank();
+        if(indexOfPerformerRole < 0 || indexOfUserRole < 0  || indexOfRoleToChange < 0){
+            throw new IllegalArgumentException("Invalid roles!");
+        }
+        return indexOfPerformerRole <= indexOfUserRole && indexOfPerformerRole <= indexOfRoleToChange;
     }
     /**
      * Generates a random token as a Base64-encoded string.
@@ -359,6 +510,11 @@ public class AuthService {
      */
     public static class InvalidLoginTypeException extends RuntimeException{
         public InvalidLoginTypeException(String message){
+            super(message);
+        }
+    }
+    public static class SameUserException extends RuntimeException{
+        public SameUserException(String message){
             super(message);
         }
     }

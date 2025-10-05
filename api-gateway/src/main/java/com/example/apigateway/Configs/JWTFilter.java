@@ -63,12 +63,22 @@ public class JWTFilter implements Ordered {
                 String email = (String) claims.get(EMAIL_CLAIM_KEY);
                 String version = (String) claims.get(VERSION_CLAIM_KEY);
                 String role = (String) claims.get(ROLE_CLAIM_KEY);
+                System.out.println(role);
                 Boolean verified = (Boolean) claims.get(VERIFIED_CLAIM_KEY);
                 if (email == null || verified == null || role == null || version == null) {
-                    log.info("Invalid token");
                     return handleErrorResponse(exchange,HttpStatus.BAD_REQUEST,"Token is corrupted");
                 } else {
-                    String storedVersion = extractTokenVersionFromRedis(email);
+                    String storedVersionRaw = extractTokenVersionFromRedis(email);
+                    String storedVersion;
+                    int dashIndex = storedVersionRaw.indexOf("-");
+                    if (dashIndex != -1 && dashIndex == storedVersionRaw.length()-2) {
+                        storedVersion = storedVersionRaw.substring(0, dashIndex);
+                        int rank = Integer.parseInt(storedVersionRaw.substring(dashIndex+1));
+                        role = getUserRoleByRange(rank);
+                    } else {
+                        storedVersion = storedVersionRaw; // or handle differently if no "-" exists
+                    }
+
                     if(Objects.equals(storedVersion,version)){
                         log.info(version);
                         ServerHttpRequest modifiedRequest = request.mutate()
@@ -137,7 +147,10 @@ public class JWTFilter implements Ordered {
         String errorBody = String.format("{\"error\": \"%s\"}", errorMessage);
         return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(errorBody.getBytes())));
     }
-
+    private String getUserRoleByRange(int rank){
+       List<String> roles = List.of("SUPER_ADMIN","ADMIN","TEAM_MEMBER","TEAM_DOCTOR","DOCTOR","USER");
+       return roles.get(rank);
+    }
     /**
      * Defines the order of this filter in the Spring Cloud Gateway filter chain.
      * Set to -1 to ensure this filter runs early in the chain.
