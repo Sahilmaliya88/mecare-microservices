@@ -47,7 +47,6 @@ public class AuthController {
         log.info("hello {}",userName);
         return "Hello from auth service";
     }
-
     @Operation(summary = "Register new user", description = "Register a new user and return authentication token.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User registered successfully",
@@ -77,7 +76,6 @@ public class AuthController {
         String token = authService.verifyUser(verifyRequest);
         return ResponseEntity.ok(Map.of("status",true,"message","Verification successful","token",token));
     }
-
     @Operation(summary = "Get current user", description = "Get details of the currently authenticated user.")
     @PreAuthorize("isAuthenticated()")
     @ApiResponse(responseCode = "200", description = "User details fetched successfully",
@@ -178,13 +176,41 @@ public class AuthController {
         Map<String,Object> response = Map.of("status",true,"token",token);
         return ResponseEntity.ok(response);
     }
+    @Operation(
+            summary = "End impersonating user",
+            description = """
+                    Operation end impersonating specific user and gives new jwt token of actual user 
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"),
+            responses = {
+                    @ApiResponse(
+                            responseCode = "200",
+                            description = "Successfully impersonated user",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(example = "{\"status\": true, \"token\": \"<jwt_token_here>\"}")
+                            )
+                    ),
+                    @ApiResponse(responseCode = "400", description = "Invalid email format"),
+                    @ApiResponse(responseCode = "403", description = "Access denied — insufficient privileges"),
+                    @ApiResponse(responseCode = "500", description = "Server error while impersonating user")
+            }
 
+    )
     @PreAuthorize("isAuthenticated()")
     @GetMapping("impersonation/end")
     public ResponseEntity<Map<String,Object>> exitImpersonating(HttpServletRequest request) throws JsonProcessingException {
         String token = authService.exitImpersonating(request);
         Map<String,Object> response = Map.of("status",true,"token",token);
         return ResponseEntity.ok(response);
+    }
+    @PreAuthorize("isAuthenticated()")
+    @PatchMapping("change-password")
+    public ResponseEntity<Map<String,Object>> changePassword(@RequestBody @Valid ChangePasswordRequest changePasswordRequest){
+        String token = authService.updatePassword(changePasswordRequest);
+        Map<String,Object> response = Map.of("status",true,"token",token);
+        return ResponseEntity.ok(response);
+
     }
 }
 

@@ -1,21 +1,29 @@
 package com.example.authservice.services;
-import com.example.authservice.DTOS.*;
-import com.example.authservice.Entities.UserEntity;
-import com.example.authservice.repositories.UserRepository;
-import com.example.authservice.utils.LoginProviders;
-import com.example.authservice.utils.UserRoles;
-import com.example.authservice.utils.exceptions.Unauthorize;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import jakarta.servlet.http.HttpServletRequest;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.catalina.User;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
+
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisTemplate;
-
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -28,15 +36,23 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
+import com.example.authservice.DTOS.ChangePasswordRequest;
+import com.example.authservice.DTOS.ChangeUserRoleRequest;
+import com.example.authservice.DTOS.GoogleUserProfileResponse;
+import com.example.authservice.DTOS.RegisterUserRequest;
+import com.example.authservice.DTOS.ResetPasswordRequest;
+import com.example.authservice.DTOS.SocialLoginRequest;
+import com.example.authservice.DTOS.UploadCsvRequest;
+import com.example.authservice.DTOS.VerifyRequest;
+import com.example.authservice.Entities.UserEntity;
+import com.example.authservice.repositories.UserRepository;
+import com.example.authservice.utils.LoginProviders;
+import com.example.authservice.utils.UserRoles;
+import com.example.authservice.utils.exceptions.Unauthorize;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
@@ -54,10 +70,13 @@ public class AuthService {
     private final EmailService emailService;
     private final JWTService jwtService;
     private final PasswordEncoder passwordEncoder;
-    private final RedisTemplate<String,Object> redisTemplate;
+    private final RedisTemplate<String, Object> redisTemplate;
     private final AuthenticationManager authenticationManager;
     private final RestTemplate restTemplate;
-    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService, PasswordEncoder passwordEncoder, RedisTemplate<String,Object> redisTemplate, AuthenticationManager authenticationManager, RestTemplate restTemplate){
+
+    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService,
+            PasswordEncoder passwordEncoder, RedisTemplate<String, Object> redisTemplate,
+            AuthenticationManager authenticationManager, RestTemplate restTemplate) {
         this.userRepository = userRepository;
         this.emailService = emailService;
         this.jwtService = jwtService;
@@ -66,15 +85,16 @@ public class AuthService {
         this.authenticationManager = authenticationManager;
         this.restTemplate = restTemplate;
     }
+
     public String registerUser(RegisterUserRequest registerUserRequest) throws JsonProcessingException {
-        //create hash of password
+        // create hash of password
         BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(12);
         String hashedPassword = passwordEncoder.encode(registerUserRequest.getPassword());
         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
         String otp = generateOtp(6);
-        Date verificationCodeExpiresAt = new Date(new Date().getTime()+15*60*1000);
-        //create user
-        UserEntity newUser =UserEntity.builder()
+        Date verificationCodeExpiresAt = new Date(new Date().getTime() + 15 * 60 * 1000);
+        // create user
+        UserEntity newUser = UserEntity.builder()
                 .email(registerUserRequest.getEmail())
                 .password(hashedPassword)
                 .token_version(tokenVersion)
@@ -82,44 +102,55 @@ public class AuthService {
                 .verification_code_expires_at(verificationCodeExpiresAt)
                 .verification_code(otp)
                 .build();
-        //send verification code
+        // send verification code
         userRepository.save(newUser);
-        //generate token and set version to redis
-        redisTemplate.opsForValue().set(VERSION_PREFIX+newUser.getEmail(),newUser.getToken_version());
+        // generate token and set version to redis
+        redisTemplate.opsForValue().set(VERSION_PREFIX + newUser.getEmail(), newUser.getToken_version());
         String jwtToken = generateJwt(newUser);
-        //save user
+        // save user
         emailService.sendWelcomeEmail(newUser);
-        //return response
+        // return response
         return jwtToken;
     }
+
     public String verifyUser(VerifyRequest verifyRequest) throws JsonProcessingException {
         UserEntity userEntity = userRepository.findByEmail(verifyRequest.getEmail())
-                .orElseThrow(()->new Unauthorize("User not found with this email"));
-        if(!Objects.equals(userEntity.getVerification_code(), verifyRequest.getOtp())) throw new Unauthorize("Invalid Otp", HttpStatus.UNAUTHORIZED);
-        if(userEntity.getVerification_code_expires_at().before(new Date())) throw new Unauthorize("Otp expired!.please request new one",HttpStatus.BAD_REQUEST);
+                .orElseThrow(() -> new Unauthorize("User not found with this email"));
+        if (!Objects.equals(userEntity.getVerification_code(), verifyRequest.getOtp()))
+            throw new Unauthorize("Invalid Otp", HttpStatus.UNAUTHORIZED);
+        if (userEntity.getVerification_code_expires_at().before(new Date()))
+            throw new Unauthorize("Otp expired!.please request new one", HttpStatus.BAD_REQUEST);
         userEntity.setIs_verified(true);
         userEntity.setVerification_code(null);
         userEntity.setVerification_code_expires_at(null);
         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-        redisTemplate.opsForValue().set(VERSION_PREFIX+userEntity.getEmail(),tokenVersion);
+        redisTemplate.opsForValue().set(VERSION_PREFIX + userEntity.getEmail(), tokenVersion);
         userEntity.setToken_version(tokenVersion);
         userRepository.save(userEntity);
         return jwtService.getJwtToken(userEntity);
     }
+
     public String loginUser(RegisterUserRequest registerUserRequest) throws JsonProcessingException {
-         Authentication authentication= authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(registerUserRequest.getEmail(),registerUserRequest.getPassword()));
-         if(!authentication.isAuthenticated()) throw new Unauthorize("Invalid credentials!");
-         UserEntity userEntity = userRepository.findByEmail(registerUserRequest.getEmail())
-                 .orElseThrow(()->new Unauthorize("User not found!"));
-         if(userEntity.getProvider() != LoginProviders.EMAIL){
-             throw new InvalidLoginTypeException("Please login through "+userEntity.getProvider());
-         }
-         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-         userEntity.setToken_version(tokenVersion);
-         userRepository.save(userEntity);
-         redisTemplate.opsForValue().set(VERSION_PREFIX+userEntity.getEmail(),tokenVersion);
-         return generateJwt(userEntity);
+        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
+                registerUserRequest.getEmail(), registerUserRequest.getPassword()));
+        if (!authentication.isAuthenticated())
+            throw new Unauthorize("Invalid credentials!");
+        UserEntity userEntity = userRepository.findByEmail(registerUserRequest.getEmail())
+                .orElseThrow(() -> new Unauthorize("User not found!"));
+        if (userEntity.getProvider() != LoginProviders.EMAIL) {
+            throw new InvalidLoginTypeException("Please login through " + userEntity.getProvider());
+        }
+        String tokenVersion = Optional.ofNullable(userEntity.getToken_version())
+                .orElseGet(() -> {
+                    String version = Long.toString(ThreadLocalRandom.current().nextLong());
+                    userEntity.setToken_version(version);
+                    userRepository.save(userEntity);
+                    return version;
+                });
+        redisTemplate.opsForValue().set(VERSION_PREFIX + userEntity.getEmail(), tokenVersion);
+        return generateJwt(userEntity);
     }
+
     /**
      * Retrieves the authenticated user's details from the security context.
      *
@@ -129,7 +160,8 @@ public class AuthService {
     public UserEntity getAuthenticatedUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        if (authentication == null || !authentication.isAuthenticated() || authentication.getPrincipal() instanceof AnonymousAuthenticationToken) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication.getPrincipal() instanceof AnonymousAuthenticationToken) {
             throw new Unauthorize("User must be logged in to access this resource");
         }
 
@@ -141,14 +173,16 @@ public class AuthService {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new Unauthorize("No user found with email: " + email));
     }
+
     /**
      * Send verification code if user is not verified
-     * throws Unauthorize if the user is not authenticated or the email is invalid also can throw mail error
+     * throws Unauthorize if the user is not authenticated or the email is invalid
+     * also can throw mail error
      */
-    public void  sendVerificationCode(){
+    public void sendVerificationCode() {
         UserEntity user = getAuthenticatedUser();
         // Generate OTP and set expiration
-        if(user.getIs_verified()){
+        if (user.getIs_verified()) {
             throw new AlreadyVerifiedException("User is already verified");
         }
         String verificationCode = generateOtp(OTP_LENGTH);
@@ -175,44 +209,49 @@ public class AuthService {
     }
 
     /**
-     * Generates Uniques password reset link valid for 15 minutes and sends user through mail
-     * @param email  the user's email
-     * @throws UserNotfoundException throws this exception if user not found with provided email
+     * Generates Uniques password reset link valid for 15 minutes and sends user
+     * through mail
+     * 
+     * @param email the user's email
+     * @throws UserNotfoundException throws this exception if user not found with
+     *                               provided email
      *
      */
-    public void sendPasswordResetLink(String email){
+    public void sendPasswordResetLink(String email) {
         UserEntity userEntity = userRepository.findByEmail(email)
-                .orElseThrow(()->new UserNotfoundException("User not found with email: "+email));
-        //generate a string
-        if(userEntity.getProvider() != LoginProviders.EMAIL){
+                .orElseThrow(() -> new UserNotfoundException("User not found with email: " + email));
+        // generate a string
+        if (userEntity.getProvider() != LoginProviders.EMAIL) {
             throw new InvalidLoginTypeException("You can not change password!");
         }
         String passwordResetToken = generateRandomToken(32);
-        Instant instant = Instant.now().plus(15,ChronoUnit.MINUTES);
-        //generated token and expiry data into user entity object
+        Instant instant = Instant.now().plus(15, ChronoUnit.MINUTES);
+        // generated token and expiry data into user entity object
         userEntity.setPassword_reset_token(passwordResetToken);
         userEntity.setPassword_reset_token_expires_at(Date.from(instant));
-        //send verification code
+        // send verification code
         emailService.sendPasswordResetLink(userEntity);
         userRepository.save(userEntity);
     }
 
     /**
      * verifies password reset token and if finds valid then changes password
-     * @param token   password reset-token received from user
+     * 
+     * @param token                password reset-token received from user
      * @param resetPasswordRequest request body {@link ResetPasswordRequest}
-     * @throws InvalidTokenException if token is invalid or expired
+     * @throws InvalidTokenException    if token is invalid or expired
      * @throws IllegalArgumentException if body is empty
-     * @throws RuntimeException if failed to save in database
+     * @throws RuntimeException         if failed to save in database
      */
-    public void changePassword(String token, ResetPasswordRequest resetPasswordRequest){
-        UserEntity user = userRepository.findByValidPasswordResetToken(token,new Date())
-                .orElseThrow(()-> new InvalidTokenException("Token is Invalid or expired!"));
-        if(resetPasswordRequest.getPassword() == null){
+    public void changePassword(String token, ResetPasswordRequest resetPasswordRequest) {
+        UserEntity user = userRepository.findByValidPasswordResetToken(token, new Date())
+                .orElseThrow(() -> new InvalidTokenException("Token is Invalid or expired!"));
+        if (resetPasswordRequest.getPassword() == null) {
             throw new IllegalArgumentException("Please provide password to change");
         }
-        if(user.getProvider() != LoginProviders.EMAIL){
-            throw new InvalidLoginTypeException("You can not change password cause you registered with "+user.getProvider());
+        if (user.getProvider() != LoginProviders.EMAIL) {
+            throw new InvalidLoginTypeException(
+                    "You can not change password cause you registered with " + user.getProvider());
         }
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(12);
         user.setPassword(encoder.encode(resetPasswordRequest.getPassword()));
@@ -220,22 +259,25 @@ public class AuthService {
         user.setPassword_reset_token(null);
         user.setToken_version(null);
         user.setUpdated_at(new Date());
-        //remove version from redis
-        redisTemplate.opsForValue().getAndDelete(VERSION_PREFIX+user.getEmail());
+        // remove version from redis
+        redisTemplate.opsForValue().getAndDelete(VERSION_PREFIX + user.getEmail());
         try {
             userRepository.save(user);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
+
     /**
      * calls login functions of required oauth provides
-     * @param socialLoginRequestBody {@link SocialLoginRequest} an request object received from user
+     * 
+     * @param socialLoginRequestBody {@link SocialLoginRequest} an request object
+     *                               received from user
      * @return {@link String} jwt token generated for that user
      */
-    public String socialLogin(SocialLoginRequest socialLoginRequestBody){
+    public String socialLogin(SocialLoginRequest socialLoginRequestBody) {
         if (Objects.requireNonNull(socialLoginRequestBody.getProvider()) == LoginProviders.GOOGLE) {
-         return googleOauthLogin(socialLoginRequestBody.getAccessToken());
+            return googleOauthLogin(socialLoginRequestBody.getAccessToken());
         } else {
             throw new InvalidLoginTypeException("Current provider is not available");
         }
@@ -244,60 +286,67 @@ public class AuthService {
     /**
      * fetches user profile from Google using access token
      * register user if not exists or returns jwt token if user exists
+     * 
      * @param accessToken {@link String} access token for Google apis
-     * @throws InvalidLoginTypeException if user tries to log in with different provider than registered
-     * @throws IllegalArgumentException if access token is missing
-     * @throws RestClientException if retrieves invalid response from Google
-     * @throws RuntimeException if failed to save user into database
+     * @throws InvalidLoginTypeException if user tries to log in with different
+     *                                   provider than registered
+     * @throws IllegalArgumentException  if access token is missing
+     * @throws RestClientException       if retrieves invalid response from Google
+     * @throws RuntimeException          if failed to save user into database
      */
-    private String googleOauthLogin(String accessToken){
-        if(accessToken.isBlank()){
+    private String googleOauthLogin(String accessToken) {
+        if (accessToken.isBlank()) {
             log.error("access token is missing");
             throw new IllegalArgumentException("access token is required");
         }
-        try{
+        try {
             String googleProfileApiUrl = "https://www.googleapis.com/oauth2/v2/userinfo";
-            //prepare request entity
+            // prepare request entity
             HttpHeaders httpHeaders = new HttpHeaders();
             httpHeaders.setBearerAuth(accessToken);
             HttpEntity<Void> httpEntity = new HttpEntity<>(httpHeaders);
-            log.info("making google user profile request with {}",googleProfileApiUrl);
-            //sends request to google for profile details
-            ResponseEntity<GoogleUserProfileResponse> googleProfileResponse= restTemplate
-                    .exchange(googleProfileApiUrl, HttpMethod.GET,httpEntity, GoogleUserProfileResponse.class);
-            //throws error if response is invalid
-            if(googleProfileResponse.getStatusCode() != HttpStatus.OK || googleProfileResponse.getBody() == null){
-                log.error("failed to retrieve user profile from google: {}",googleProfileResponse.getStatusCode());
+            log.info("making google user profile request with {}", googleProfileApiUrl);
+            // sends request to google for profile details
+            ResponseEntity<GoogleUserProfileResponse> googleProfileResponse = restTemplate
+                    .exchange(googleProfileApiUrl, HttpMethod.GET, httpEntity, GoogleUserProfileResponse.class);
+            // throws error if response is invalid
+            if (googleProfileResponse.getStatusCode() != HttpStatus.OK || googleProfileResponse.getBody() == null) {
+                log.error("failed to retrieve user profile from google: {}", googleProfileResponse.getStatusCode());
                 throw new RestClientException("Invalid response from Google API");
             }
             GoogleUserProfileResponse googleProfile = googleProfileResponse.getBody();
-            log.info("successfully user profile retrieved of: {}",googleProfile.getFamily_name());
-            //check user exists
-            if(googleProfile.getEmail() == null || googleProfile.getEmail().isBlank()){
+            log.info("successfully user profile retrieved of: {}", googleProfile.getFamily_name());
+            // check user exists
+            if (googleProfile.getEmail() == null || googleProfile.getEmail().isBlank()) {
                 throw new IllegalArgumentException("Email is missing from google response");
             }
             Optional<UserEntity> optionalUser = userRepository.findByEmail(googleProfile.getEmail());
-            if(optionalUser.isPresent()){
+            if (optionalUser.isPresent()) {
                 UserEntity user = optionalUser.get();
-                log.info("optional user from database {}",user.getEmail());
-                //throws error if provider is different
-                if(user.getProvider() != LoginProviders.GOOGLE){
-                    throw new InvalidLoginTypeException("Please login with "+user.getProvider());
+                log.info("optional user from database {}", user.getEmail());
+                // throws error if provider is different
+                if (user.getProvider() != LoginProviders.GOOGLE) {
+                    throw new InvalidLoginTypeException("Please login with " + user.getProvider());
                 }
-                //generate token version
-                String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-                user.setToken_version(tokenVersion);
-                //save user
-                try{
+                // generate token version
+                String tokenVersion = Optional.ofNullable(user.getToken_version())
+                        .orElseGet(() -> {
+                            String version = Long.toString(ThreadLocalRandom.current().nextLong());
+                            user.setToken_version(version);
+                            userRepository.save(user);
+                            return version;
+                        });
+                // save user
+                try {
                     userRepository.save(user);
                 } catch (RuntimeException e) {
                     log.error("failed to save user");
                     throw new RuntimeException(e);
                 }
-                redisTemplate.opsForValue().set(VERSION_PREFIX+user.getEmail(),tokenVersion);
-                //generate jwt and save user
+                redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), tokenVersion);
+                // generate jwt and save user
                 return generateJwt(user);
-            }else {
+            } else {
                 String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
                 UserEntity user = UserEntity.builder()
                         .email(googleProfile.getEmail())
@@ -308,44 +357,48 @@ public class AuthService {
                         .role(UserRoles.USER)
                         .token_version(tokenVersion)
                         .build();
-                try{
+                try {
                     userRepository.save(user);
                 } catch (RuntimeException e) {
                     log.error("failed to save user");
                     throw new RuntimeException(e);
                 }
-                redisTemplate.opsForValue().set(VERSION_PREFIX+user.getEmail(),tokenVersion);
+                redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), tokenVersion);
                 return generateJwt(user);
             }
-        }catch (RestClientException e){
-            log.error("unexpected error encountered during request: {}",e.getMessage());
+        } catch (RestClientException e) {
+            log.error("unexpected error encountered during request: {}", e.getMessage());
             throw e;
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
     }
+
     /**
      * Changes user roles
+     * 
      * @param changeUserRoleRequest the request body {@link ChangeUserRoleRequest}
      */
-    public void changeUserRole(ChangeUserRoleRequest changeUserRoleRequest){
+    public void changeUserRole(ChangeUserRoleRequest changeUserRoleRequest) {
         UserEntity operator = getAuthenticatedUser();
-        if(operator == null){
+        if (operator == null) {
             throw new Unauthorize("Please login!");
         }
-        if(operator.getEmail().equals(changeUserRoleRequest.getEmail())){
+        if (operator.getEmail().equals(changeUserRoleRequest.getEmail())) {
             throw new SameUserException("You can not change own role");
         }
-        log.info("operator rank is {}",operator.getRole().getRank());
+        log.info("operator rank is {}", operator.getRole().getRank());
         try {
-            if(operator.getRole() == null || operator.getRole().equals(UserRoles.USER) || operator.getRole().equals(UserRoles.DOCTOR)){
+            if (operator.getRole() == null || operator.getRole().equals(UserRoles.USER)
+                    || operator.getRole().equals(UserRoles.DOCTOR)) {
                 throw new Unauthorize("You don't have permission to perform this action");
             }
-            //fetch user
+            // fetch user
             UserEntity user = userRepository.findByEmail(changeUserRoleRequest.getEmail())
-                    .orElseThrow(()->new UserNotfoundException("User not found with this email"));
-            boolean isPermitted = checkUserCanChangeRole(operator.getRole(),user.getRole(),changeUserRoleRequest.getUserRole());
-            if(!isPermitted){
+                    .orElseThrow(() -> new UserNotfoundException("User not found with this email"));
+            boolean isPermitted = checkUserCanChangeRole(operator.getRole(), user.getRole(),
+                    changeUserRoleRequest.getUserRole());
+            if (!isPermitted) {
                 throw new Unauthorize("you are unauthorized to perform this action");
             }
             user.setRole(changeUserRoleRequest.getUserRole());
@@ -355,20 +408,20 @@ public class AuthService {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-            String USER_VERSION_KEY = "version-"+user.getEmail();
+            String USER_VERSION_KEY = "version-" + user.getEmail();
             String redisTokenVersion = (String) redisTemplate.opsForValue().get(USER_VERSION_KEY);
-            if(redisTokenVersion == null || redisTokenVersion.isBlank()){
+            if (redisTokenVersion == null || redisTokenVersion.isBlank()) {
                 return;
             }
             int dashIndex = redisTokenVersion.indexOf("-");
             String updatedTokenForUser;
-            if(dashIndex !=1 && dashIndex == redisTokenVersion.length()-2){
-                updatedTokenForUser = redisTokenVersion.substring(0,dashIndex)+"-"+user.getRole().getRank();
-            }else{
-                updatedTokenForUser = redisTokenVersion+"-"+user.getRole().getRank();
+            if (dashIndex != 1 && dashIndex == redisTokenVersion.length() - 2) {
+                updatedTokenForUser = redisTokenVersion.substring(0, dashIndex) + "-" + user.getRole().getRank();
+            } else {
+                updatedTokenForUser = redisTokenVersion + "-" + user.getRole().getRank();
             }
             try {
-                redisTemplate.opsForValue().set(USER_VERSION_KEY,updatedTokenForUser);
+                redisTemplate.opsForValue().set(USER_VERSION_KEY, updatedTokenForUser);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -381,20 +434,21 @@ public class AuthService {
 
     /**
      * Process the CSV files from the request and Insert to the database
+     * 
      * @param request {@link UploadCsvRequest} object containing CSV file
      * @return {@link Integer} total number of inserted records
      * @throws IllegalArgumentException if file is invalid of empty
-     * @throws RuntimeException if database operation fails
+     * @throws RuntimeException         if database operation fails
      */
-    public int insertUsers(UploadCsvRequest request){
+    public int insertUsers(UploadCsvRequest request) {
         MultipartFile file = request.getFile();
-        if(file == null || file.isEmpty()){
+        if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Please enter valid file");
         }
         try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
-            CSVFormat csvFormat = CSVFormat.
-                    DEFAULT
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
+            CSVFormat csvFormat = CSVFormat.DEFAULT
                     .builder()
                     .setHeader()
                     .setSkipHeaderRecord(true)
@@ -416,41 +470,44 @@ public class AuthService {
             throw new RuntimeException(e);
         }
     }
+
     public String impersonateUser(String email) throws JsonProcessingException {
-        if(email == null || email.isEmpty()){
+        if (email == null || email.isEmpty()) {
             throw new IllegalArgumentException("Invalid parameters");
         }
         UserEntity performer = this.getAuthenticatedUser();
-        if(performer == null){
+        if (performer == null) {
             throw new Unauthorize("Please login before perform this action");
         }
-        if(performer.getRole() != UserRoles.ADMIN && performer.getRole() != UserRoles.SUPER_ADMIN){
+        if (performer.getRole() != UserRoles.ADMIN && performer.getRole() != UserRoles.SUPER_ADMIN) {
             throw new Unauthorize("You can not impersonate any user");
         }
         UserEntity targetUser = userRepository.findByEmail(email)
-                .orElseThrow(()-> new UserNotfoundException("User not found with email:"+email));
-        if(targetUser.getRole().getRank() < performer.getRole().getRank()){
+                .orElseThrow(() -> new UserNotfoundException("User not found with email:" + email));
+        if (targetUser.getRole().getRank() < performer.getRole().getRank()) {
             throw new Unauthorize("You can not impersonate your superior");
         }
         long tokenVersion = ThreadLocalRandom.current().nextLong();
-        String updatedToken = jwtService.getJwtToken(targetUser,performer.getEmail(),Long.toString(tokenVersion));
-        ListOperations<String,Object> listOps = redisTemplate.opsForList();
-        String Key = IMPERSONATE_PREFIX+targetUser.getEmail();
-        listOps.rightPush(Key,tokenVersion);
+        String updatedToken = jwtService.getJwtToken(targetUser, performer.getEmail(), Long.toString(tokenVersion));
+        ListOperations<String, Object> listOps = redisTemplate.opsForList();
+        String Key = IMPERSONATE_PREFIX + targetUser.getEmail();
+        listOps.rightPush(Key, tokenVersion);
         return updatedToken;
     }
+
     /**
      * converts valid csv record to UserEntity
+     * 
      * @param record {@link CSVRecord} a record containing email and password
      * @return {@link UserEntity} an userEntity
      */
-    private UserEntity insertUser(CSVRecord record){
+    private UserEntity insertUser(CSVRecord record) {
         String email = record.get("email");
         String password = record.get("password");
-        if(email == null || email.isBlank()){
+        if (email == null || email.isBlank()) {
             return null;
         }
-       String decodedPassword = passwordEncoder.encode(password);
+        String decodedPassword = passwordEncoder.encode(password);
         return UserEntity.builder()
                 .email(email)
                 .password(decodedPassword)
@@ -460,12 +517,15 @@ public class AuthService {
                 .provider(LoginProviders.EMAIL)
                 .build();
     }
+
     /**
      * Function end impersonating session retrieved from token and headers
+     * 
      * @param request {@link HttpServletRequest} request object
-     * @throws InvalidTokenException if token have invalid version number or missing any data
-     * @throws RuntimeException if any headers are missing
-     * @throws UserNotfoundException if actual user not present in database
+     * @throws InvalidTokenException   if token have invalid version number or
+     *                                 missing any data
+     * @throws RuntimeException        if any headers are missing
+     * @throws UserNotfoundException   if actual user not present in database
      * @throws JsonProcessingException if any failed to create or parse jwt token
      */
     public String exitImpersonating(HttpServletRequest request) throws JsonProcessingException {
@@ -492,12 +552,12 @@ public class AuthService {
         if (versions == null || versions.isEmpty() || !versions.contains(version)) {
             throw new InvalidTokenException("Invalid token version");
         }
-        log.info("Versions {}",versions.toString());
+        log.info("Versions {}", versions.toString());
         redisTemplate.opsForList().remove(redisKey, 1, version);
 
         String actualUserEmail = request.getHeader(IMPERSONATE_BY);
         UserEntity user = userRepository.findByEmail(actualUserEmail)
-                .orElseThrow(() -> new UserNotfoundException("User not found: " + actualUserEmail));
+                .orElseThrow(() -> new UserNotfoundException("user not found with email: " + actualUserEmail));
 
         long newTokenVersion = ThreadLocalRandom.current().nextLong();
         redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), newTokenVersion);
@@ -506,11 +566,59 @@ public class AuthService {
 
         return jwtService.getJwtToken(user);
     }
+
+    /**
+     * Updates the authenticated user's password after validating the old password.
+     * 
+     * @param changePasswordRequest the request body containing old and new
+     *                              passwords
+     * @return a new JWT token if the password is successfully updated
+     * @throws IllegalArgumentException  if the request body is invalid
+     * @throws Unauthorize               if the user is not authenticated or the old
+     *                                   password is incorrect
+     * @throws InvalidLoginTypeException if the user registered with a different
+     *                                   provider
+     * @throws RuntimeException          if saving the updated user fails
+     */
+    public String updatePassword(ChangePasswordRequest changePasswordRequest) {
+        if (changePasswordRequest.getNewPassword().isEmpty() || changePasswordRequest.getOldPassword().isEmpty()) {
+            throw new IllegalArgumentException("Invalid argumets");
+        }
+        UserEntity user = getAuthenticatedUser();
+        if (user == null) {
+            throw new Unauthorize("Please login!");
+        }
+        if (user.getProvider() != LoginProviders.EMAIL) {
+            throw new InvalidLoginTypeException(
+                    "You can not change password cause you registered with " + user.getProvider());
+        }
+        if (!passwordEncoder.matches(changePasswordRequest.getOldPassword(), user.getPassword())) {
+            throw new Unauthorize("Old password is incorrect");
+        }
+        if (passwordEncoder.matches(changePasswordRequest.getNewPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("New password must be different from old password");
+        }
+        user.setPassword(passwordEncoder.encode(changePasswordRequest.getNewPassword()));
+        user.setUpdated_at(new Date());
+        if (changePasswordRequest.isLogoutFromOtherDevices() || user.getToken_version() == null) {
+            String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
+            user.setToken_version(tokenVersion);
+            redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), tokenVersion);
+        }
+        try {
+            userRepository.save(user);
+            return jwtService.getJwtToken(user);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /**
      * Validates if the request is eligible for exiting impersonation.
      *
      * @param request The HTTP request object.
-     * @return True if the request is valid for exiting impersonation, false otherwise.
+     * @return True if the request is valid for exiting impersonation, false
+     *         otherwise.
      */
     private boolean isValidRequestForExitImpersonate(HttpServletRequest request) {
         String email = request.getHeader(IMPERSONATE_BY);
@@ -534,26 +642,30 @@ public class AuthService {
         }
         return authHeader.substring(BEARER_PREFIX.length());
     }
+
     /**
-     * Check role hierarchy that is performer is superior to target role and current user role
-     * @param performerRole - {@link UserRoles} role of Action performer
+     * Check role hierarchy that is performer is superior to target role and current
+     * user role
+     * 
+     * @param performerRole   - {@link UserRoles} role of Action performer
      * @param currentUserRole - {@link UserRoles} current role user
-     * @param targetRole - {@link UserRoles} target role
+     * @param targetRole      - {@link UserRoles} target role
      * @return true if performer is superior else false
      * @throws IllegalArgumentException if any function parameters are invalid
      */
-    public boolean checkUserCanChangeRole(UserRoles performerRole,UserRoles currentUserRole,UserRoles targetRole){
-        if(performerRole == null || currentUserRole == null || targetRole == null){
+    public boolean checkUserCanChangeRole(UserRoles performerRole, UserRoles currentUserRole, UserRoles targetRole) {
+        if (performerRole == null || currentUserRole == null || targetRole == null) {
             throw new IllegalArgumentException("Invalid parameter to perform this action");
         }
         int indexOfPerformerRole = performerRole.getRank();
         int indexOfUserRole = currentUserRole.getRank();
         int indexOfRoleToChange = targetRole.getRank();
-        if(indexOfPerformerRole < 0 || indexOfUserRole < 0  || indexOfRoleToChange < 0){
+        if (indexOfPerformerRole < 0 || indexOfUserRole < 0 || indexOfRoleToChange < 0) {
             throw new IllegalArgumentException("Invalid roles!");
         }
         return indexOfPerformerRole <= indexOfUserRole && indexOfPerformerRole <= indexOfRoleToChange;
     }
+
     /**
      * Generates a random token as a Base64-encoded string.
      *
@@ -570,9 +682,11 @@ public class AuthService {
         secureRandom.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
+
     private String generateJwt(UserEntity userEntity) throws JsonProcessingException {
         return jwtService.getJwtToken(userEntity);
     }
+
     private String generateOtp(int size) {
         SecureRandom random = new SecureRandom();
         StringBuilder otp = new StringBuilder();
@@ -581,41 +695,47 @@ public class AuthService {
         }
         return otp.toString();
     }
+
     /**
-    * A custom exception to user if already verified and sends verification code request
-    * */
-    public static class AlreadyVerifiedException extends RuntimeException {
-        public AlreadyVerifiedException(String message){
-            super(message);
-        }
-    }
-    /**
-     * A custom exception if User not found with provided details
-     * */
-    public static class UserNotfoundException extends RuntimeException{
-        public UserNotfoundException(String message){
-            super(message);
-        }
-    }
-    /**
-     * A custom exception if password reset token is invalid
+     * A custom exception to user if already verified and sends verification code
+     * request
      */
-    public static class InvalidTokenException extends RuntimeException{
-        public InvalidTokenException(String message){
+    public static class AlreadyVerifiedException extends RuntimeException {
+        public AlreadyVerifiedException(String message) {
             super(message);
         }
     }
 
     /**
-     * A custom exception if user try to log in with different provider than registered
+     * A custom exception if User not found with provided details
      */
-    public static class InvalidLoginTypeException extends RuntimeException{
-        public InvalidLoginTypeException(String message){
+    public static class UserNotfoundException extends RuntimeException {
+        public UserNotfoundException(String message) {
             super(message);
         }
     }
-    public static class SameUserException extends RuntimeException{
-        public SameUserException(String message){
+
+    /**
+     * A custom exception if password reset token is invalid
+     */
+    public static class InvalidTokenException extends RuntimeException {
+        public InvalidTokenException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A custom exception if user try to log in with different provider than
+     * registered
+     */
+    public static class InvalidLoginTypeException extends RuntimeException {
+        public InvalidLoginTypeException(String message) {
+            super(message);
+        }
+    }
+
+    public static class SameUserException extends RuntimeException {
+        public SameUserException(String message) {
             super(message);
         }
     }

@@ -5,10 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
-import org.intellij.lang.annotations.RegExp;
-
 @Data
-public class ChangePassword {
+public class ChangePasswordRequest {
     @NotNull(message = "Old password cannot be null")
     @Schema(
         description = "Old password (not required for Admin or Super Admin)",
