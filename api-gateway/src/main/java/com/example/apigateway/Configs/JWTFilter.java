@@ -32,11 +32,12 @@ public class JWTFilter implements Ordered {
 
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String EMAIL_CLAIM_KEY = "email";
+    private static final String IMPERSONATE_CLAIM_KEY ="impersonate";
+    private static final String IMPERSONATE_BY_CLAIM_KEY = "impersonate_by";
     private static final String VERSION_KEY_PREFIX = "version-";
     private static final String VERSION_CLAIM_KEY = "version";
     private static final String ROLE_CLAIM_KEY ="role";
-    private static final String IMPERSONATE_CLAIM_KEY ="impersonate";
-    private static final String IMPERSONATE_BY_CLAIM_KEY = "impersonate_by";
+
     private static final String VERIFIED_CLAIM_KEY = "verified";
     private static final String EMAIL_HEADER_KEY= "x-user-email";
     private static final String ROLE_HEADER_KEY = "x-user-role";

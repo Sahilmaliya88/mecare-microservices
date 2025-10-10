@@ -3,11 +3,12 @@ import com.example.authservice.DTOS.*;
 import com.example.authservice.Entities.UserEntity;
 import com.example.authservice.repositories.UserRepository;
 import com.example.authservice.utils.LoginProviders;
-import com.example.authservice.utils.UserPrincipal;
 import com.example.authservice.utils.UserRoles;
 import com.example.authservice.utils.exceptions.Unauthorize;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.User;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -29,14 +30,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
 
 
 @Slf4j
@@ -46,6 +45,11 @@ public class AuthService {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int OTP_LENGTH = 6;
     private static final int OTP_EXPIRY_MINUTES = 15;
+    private static final String USER_EMAIL_HEADER = "x-user-email";
+    private static final String VERSION_PREFIX = "version-";
+    private static final String IMPERSONATE_PREFIX = "impersonate-";
+    private static final String IMPERSONATE_BY = "x-user-impersonate_by";
+    private static final String IMPERSONATE = "x-user-impersonate";
     private final UserRepository userRepository;
     private final EmailService emailService;
     private final JWTService jwtService;
@@ -81,7 +85,7 @@ public class AuthService {
         //send verification code
         userRepository.save(newUser);
         //generate token and set version to redis
-        redisTemplate.opsForValue().set("version-"+newUser.getEmail(),newUser.getToken_version());
+        redisTemplate.opsForValue().set(VERSION_PREFIX+newUser.getEmail(),newUser.getToken_version());
         String jwtToken = generateJwt(newUser);
         //save user
         emailService.sendWelcomeEmail(newUser);
@@ -97,7 +101,7 @@ public class AuthService {
         userEntity.setVerification_code(null);
         userEntity.setVerification_code_expires_at(null);
         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-        redisTemplate.opsForValue().set("version-"+userEntity.getEmail(),tokenVersion);
+        redisTemplate.opsForValue().set(VERSION_PREFIX+userEntity.getEmail(),tokenVersion);
         userEntity.setToken_version(tokenVersion);
         userRepository.save(userEntity);
         return jwtService.getJwtToken(userEntity);
@@ -113,7 +117,7 @@ public class AuthService {
          String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
          userEntity.setToken_version(tokenVersion);
          userRepository.save(userEntity);
-         redisTemplate.opsForValue().set("version-"+userEntity.getEmail(),tokenVersion);
+         redisTemplate.opsForValue().set(VERSION_PREFIX+userEntity.getEmail(),tokenVersion);
          return generateJwt(userEntity);
     }
     /**
@@ -217,7 +221,7 @@ public class AuthService {
         user.setToken_version(null);
         user.setUpdated_at(new Date());
         //remove version from redis
-        redisTemplate.opsForValue().getAndDelete("version-"+user.getEmail());
+        redisTemplate.opsForValue().getAndDelete(VERSION_PREFIX+user.getEmail());
         try {
             userRepository.save(user);
         } catch (Exception e) {
@@ -270,7 +274,7 @@ public class AuthService {
             log.info("successfully user profile retrieved of: {}",googleProfile.getFamily_name());
             //check user exists
             if(googleProfile.getEmail() == null || googleProfile.getEmail().isBlank()){
-                throw new IllegalArgumentException("Email is missing from goole response");
+                throw new IllegalArgumentException("Email is missing from google response");
             }
             Optional<UserEntity> optionalUser = userRepository.findByEmail(googleProfile.getEmail());
             if(optionalUser.isPresent()){
@@ -290,7 +294,7 @@ public class AuthService {
                     log.error("failed to save user");
                     throw new RuntimeException(e);
                 }
-                redisTemplate.opsForValue().set("version-"+user.getEmail(),tokenVersion);
+                redisTemplate.opsForValue().set(VERSION_PREFIX+user.getEmail(),tokenVersion);
                 //generate jwt and save user
                 return generateJwt(user);
             }else {
@@ -310,7 +314,7 @@ public class AuthService {
                     log.error("failed to save user");
                     throw new RuntimeException(e);
                 }
-                redisTemplate.opsForValue().set("version-"+user.getEmail(),tokenVersion);
+                redisTemplate.opsForValue().set(VERSION_PREFIX+user.getEmail(),tokenVersion);
                 return generateJwt(user);
             }
         }catch (RestClientException e){
@@ -431,8 +435,8 @@ public class AuthService {
         long tokenVersion = ThreadLocalRandom.current().nextLong();
         String updatedToken = jwtService.getJwtToken(targetUser,performer.getEmail(),Long.toString(tokenVersion));
         ListOperations<String,Object> listOps = redisTemplate.opsForList();
-        String Key = "impersonate-"+targetUser.getEmail();
-        listOps.rightPush(Key,Long.toString(tokenVersion));
+        String Key = IMPERSONATE_PREFIX+targetUser.getEmail();
+        listOps.rightPush(Key,tokenVersion);
         return updatedToken;
     }
     /**
@@ -455,6 +459,80 @@ public class AuthService {
                 .isActive(true)
                 .provider(LoginProviders.EMAIL)
                 .build();
+    }
+    /**
+     * Function end impersonating session retrieved from token and headers
+     * @param request {@link HttpServletRequest} request object
+     * @throws InvalidTokenException if token have invalid version number or missing any data
+     * @throws RuntimeException if any headers are missing
+     * @throws UserNotfoundException if actual user not present in database
+     * @throws JsonProcessingException if any failed to create or parse jwt token
+     */
+    public String exitImpersonating(HttpServletRequest request) throws JsonProcessingException {
+        String token = extractAuthorizationToken(request);
+        if (!isValidRequestForExitImpersonate(request)) {
+            throw new RuntimeException("Not currently impersonating");
+        }
+
+        Map<String, Object> claims = jwtService.getJwtClaims(token);
+        String versionStr = (String) claims.get("version");
+        if (versionStr == null) {
+            throw new InvalidTokenException("Invalid or missing version in token");
+        }
+
+        long version;
+        try {
+            version = Long.parseLong(versionStr);
+        } catch (NumberFormatException e) {
+            throw new InvalidTokenException("Invalid version format in token");
+        }
+
+        String redisKey = IMPERSONATE_PREFIX + request.getHeader(USER_EMAIL_HEADER);
+        List<Object> versions = redisTemplate.opsForList().range(redisKey, 0, -1);
+        if (versions == null || versions.isEmpty() || !versions.contains(version)) {
+            throw new InvalidTokenException("Invalid token version");
+        }
+        log.info("Versions {}",versions.toString());
+        redisTemplate.opsForList().remove(redisKey, 1, version);
+
+        String actualUserEmail = request.getHeader(IMPERSONATE_BY);
+        UserEntity user = userRepository.findByEmail(actualUserEmail)
+                .orElseThrow(() -> new UserNotfoundException("User not found: " + actualUserEmail));
+
+        long newTokenVersion = ThreadLocalRandom.current().nextLong();
+        redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), newTokenVersion);
+        user.setToken_version(Long.toString(newTokenVersion));
+        userRepository.save(user);
+
+        return jwtService.getJwtToken(user);
+    }
+    /**
+     * Validates if the request is eligible for exiting impersonation.
+     *
+     * @param request The HTTP request object.
+     * @return True if the request is valid for exiting impersonation, false otherwise.
+     */
+    private boolean isValidRequestForExitImpersonate(HttpServletRequest request) {
+        String email = request.getHeader(IMPERSONATE_BY);
+        String impersonatingHeader = request.getHeader(IMPERSONATE);
+        return email != null && !email.isEmpty() &&
+                "true".equalsIgnoreCase(impersonatingHeader);
+    }
+
+    /**
+     * Extracts the JWT token from the Authorization header.
+     *
+     * @param request The HTTP request object.
+     * @return The extracted JWT token.
+     * @throws Unauthorize If the Authorization header is missing or invalid.
+     */
+    private String extractAuthorizationToken(HttpServletRequest request) {
+        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String BEARER_PREFIX = "Bearer ";
+        if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
+            throw new Unauthorize("Invalid or missing Authorization header");
+        }
+        return authHeader.substring(BEARER_PREFIX.length());
     }
     /**
      * Check role hierarchy that is performer is superior to target role and current user role
@@ -529,7 +607,7 @@ public class AuthService {
     }
 
     /**
-     * A custom exception if user try to login with different provider than registered
+     * A custom exception if user try to log in with different provider than registered
      */
     public static class InvalidLoginTypeException extends RuntimeException{
         public InvalidLoginTypeException(String message){

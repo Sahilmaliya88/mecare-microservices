@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -149,10 +150,39 @@ public class AuthController {
         Map<String,Object> response = Map.of("status",true,"message","data inserted successfully","total",insertedRecord);
         return ResponseEntity.ok(response);
     }
+    @Operation(
+            summary = "Impersonate a user",
+            description = """
+            Allows an admin or super admin to impersonate another user by their email.
+            Returns a JWT token that can be used to act on behalf of that user.
+            """,
+            security = @SecurityRequirement(name = "bearerAuth"),
+            responses = {
+                    @ApiResponse(
+                            responseCode = "200",
+                            description = "Successfully impersonated user",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(example = "{\"status\": true, \"token\": \"<jwt_token_here>\"}")
+                            )
+                    ),
+                    @ApiResponse(responseCode = "400", description = "Invalid email format"),
+                    @ApiResponse(responseCode = "403", description = "Access denied — insufficient privileges"),
+                    @ApiResponse(responseCode = "500", description = "Server error while impersonating user")
+            }
+    )
     @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN')")
     @GetMapping("/{email}/impersonate")
     public ResponseEntity<Map<String,Object>> impersonateUser(@PathVariable @Email String email) throws JsonProcessingException {
         String token = authService.impersonateUser(email);
+        Map<String,Object> response = Map.of("status",true,"token",token);
+        return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("impersonation/end")
+    public ResponseEntity<Map<String,Object>> exitImpersonating(HttpServletRequest request) throws JsonProcessingException {
+        String token = authService.exitImpersonating(request);
         Map<String,Object> response = Map.of("status",true,"token",token);
         return ResponseEntity.ok(response);
     }
