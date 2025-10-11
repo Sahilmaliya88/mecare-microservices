@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
@@ -44,8 +45,11 @@ import com.example.authservice.DTOS.ResetPasswordRequest;
 import com.example.authservice.DTOS.SocialLoginRequest;
 import com.example.authservice.DTOS.UploadCsvRequest;
 import com.example.authservice.DTOS.VerifyRequest;
+import com.example.authservice.Entities.LoginSessionEntity;
 import com.example.authservice.Entities.UserEntity;
+import com.example.authservice.repositories.SessionRepository;
 import com.example.authservice.repositories.UserRepository;
+import com.example.authservice.utils.DeviceInfo;
 import com.example.authservice.utils.LoginProviders;
 import com.example.authservice.utils.UserRoles;
 import com.example.authservice.utils.exceptions.Unauthorize;
@@ -73,10 +77,12 @@ public class AuthService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final AuthenticationManager authenticationManager;
     private final RestTemplate restTemplate;
+    private final SessionRepository sessionRepository;
 
     public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService,
             PasswordEncoder passwordEncoder, RedisTemplate<String, Object> redisTemplate,
-            AuthenticationManager authenticationManager, RestTemplate restTemplate) {
+            AuthenticationManager authenticationManager, RestTemplate restTemplate,
+            SessionRepository sessionRepository) {
         this.userRepository = userRepository;
         this.emailService = emailService;
         this.jwtService = jwtService;
@@ -84,6 +90,7 @@ public class AuthService {
         this.redisTemplate = redisTemplate;
         this.authenticationManager = authenticationManager;
         this.restTemplate = restTemplate;
+        this.sessionRepository = sessionRepository;
     }
 
     public String registerUser(RegisterUserRequest registerUserRequest) throws JsonProcessingException {
@@ -130,25 +137,70 @@ public class AuthService {
         return jwtService.getJwtToken(userEntity);
     }
 
-    public String loginUser(RegisterUserRequest registerUserRequest) throws JsonProcessingException {
-        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
-                registerUserRequest.getEmail(), registerUserRequest.getPassword()));
-        if (!authentication.isAuthenticated())
-            throw new Unauthorize("Invalid credentials!");
+    public String loginUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
+            throws JsonProcessingException {
+
+        // Authenticate credentials
+        authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        registerUserRequest.getEmail(), registerUserRequest.getPassword()));
+
+        // Fetch user
         UserEntity userEntity = userRepository.findByEmail(registerUserRequest.getEmail())
                 .orElseThrow(() -> new Unauthorize("User not found!"));
+
+        // Check login provider
         if (userEntity.getProvider() != LoginProviders.EMAIL) {
             throw new InvalidLoginTypeException("Please login through " + userEntity.getProvider());
         }
-        String tokenVersion = Optional.ofNullable(userEntity.getToken_version())
-                .orElseGet(() -> {
-                    String version = Long.toString(ThreadLocalRandom.current().nextLong());
-                    userEntity.setToken_version(version);
-                    userRepository.save(userEntity);
-                    return version;
-                });
-        redisTemplate.opsForValue().set(VERSION_PREFIX + userEntity.getEmail(), tokenVersion);
-        return generateJwt(userEntity);
+
+        // IP + Device
+        String ipAddress = getClientIp(request);
+        DeviceInfo deviceInfo = registerUserRequest.getDeviceInfo();
+        log.info("Login attempt from IP: {}, Device: {}, OS: {}, Browser: {}, User-Agent: {}",
+                ipAddress,
+                deviceInfo.getDeviceId(),
+                deviceInfo.getOs(),
+                deviceInfo.getBrowser(),
+                deviceInfo.getUserAgent());
+
+        String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
+        List<LoginSessionEntity> sessions = userEntity.getLoginSessions();
+        if (sessions == null)
+            sessions = new ArrayList<>();
+
+        Optional<LoginSessionEntity> existingSessionOpt = sessions.stream()
+                .filter(s -> s.getDeviceId().equals(deviceInfo.getDeviceId()))
+                .findFirst();
+        if (existingSessionOpt.isEmpty()) {
+            LoginSessionEntity newSession = LoginSessionEntity.builder()
+                    .ipAddress(ipAddress)
+                    .user(userEntity)
+                    .deviceId(deviceInfo.getDeviceId())
+                    .deviceType(deviceInfo.getDeviceType())
+                    .os(deviceInfo.getOs())
+                    .browser(deviceInfo.getBrowser())
+                    .userAgent(deviceInfo.getUserAgent())
+                    .lastUsedAt(new Date())
+                    .isActive(true)
+                    .tokenVersion(tokenVersion)
+                    .build();
+            sessionRepository.save(newSession);
+        } else {
+            LoginSessionEntity session = existingSessionOpt.get();
+            session.setIpAddress(ipAddress);
+            session.setLastUsedAt(new Date());
+            session.setTokenVersion(tokenVersion);
+            session.setIsActive(true);
+            sessionRepository.save(session);
+        }
+
+        // Save in Redis
+        redisTemplate.opsForHash().put(
+                VERSION_PREFIX + userEntity.getId(), deviceInfo.getDeviceId(),
+                tokenVersion);
+
+        return jwtService.getJwtTokenForSession(userEntity, deviceInfo.getDeviceId(), tokenVersion);
     }
 
     /**
@@ -614,6 +666,55 @@ public class AuthService {
     }
 
     /**
+     * Deletes a user by email. Supports both hard and soft delete based on the
+     * hardDelete flag.
+     *
+     * @param email      The email of the user to be deleted.
+     * @param hardDelete If true, performs a hard delete; if false, performs a soft
+     *                   delete.
+     * @throws IllegalArgumentException if the email is null or empty.
+     * @throws Unauthorize              if the authenticated user does not have
+     *                                  permission to delete the target user.
+     * @throws UserNotfoundException    if no user is found with the provided email.
+     * @throws RuntimeException         if any database operation fails.
+     */
+    public void deleteUserByEmail(String email, boolean hardDelete) {
+        if (email == null || email.isEmpty()) {
+            throw new IllegalArgumentException("Invalid parameters");
+        }
+        UserEntity performer = this.getAuthenticatedUser();
+        if (performer == null) {
+            throw new Unauthorize("Please login before perform this action");
+        }
+        if (performer.getRole() != UserRoles.ADMIN && performer.getRole() != UserRoles.SUPER_ADMIN
+                && !performer.getEmail().equals(email)) {
+            throw new Unauthorize("You can not delete any user");
+        }
+        if (performer.getRole().getRank() > 1 && hardDelete) {
+            throw new Unauthorize("You don't have permission to perform hard delete");
+        }
+        UserEntity targetUser = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotfoundException("User not found with email:" + email));
+        if (targetUser.getRole().getRank() < performer.getRole().getRank()) {
+            throw new Unauthorize("You can not delete your superior");
+        }
+        try {
+            if (hardDelete) {
+                userRepository.delete(targetUser);
+            } else {
+                targetUser.setIsActive(false);
+                targetUser.setDeleted_at(new Date());
+                targetUser.setUpdated_at(new Date());
+                userRepository.save(targetUser);
+            }
+            String USER_VERSION_KEY = VERSION_PREFIX + targetUser.getEmail();
+            redisTemplate.delete(USER_VERSION_KEY);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
      * Validates if the request is eligible for exiting impersonation.
      *
      * @param request The HTTP request object.
@@ -641,6 +742,15 @@ public class AuthService {
             throw new Unauthorize("Invalid or missing Authorization header");
         }
         return authHeader.substring(BEARER_PREFIX.length());
+    }
+
+    public String getClientIp(HttpServletRequest request) {
+        String header = request.getHeader("X-Forwarded-For");
+        if (header == null || header.isEmpty()) {
+            return request.getRemoteAddr();
+        }
+        // First IP in list is the original client
+        return header.split(",")[0].trim();
     }
 
     /**

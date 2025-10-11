@@ -1,0 +1,20 @@
+alter table users
+    drop column token_version;
+
+CREATE TABLE login_sessions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id       VARCHAR(255) NOT NULL,
+    token_version   VARCHAR(255) NOT NULL,
+    device_type     VARCHAR(100) NOT NULL,
+    browser         VARCHAR(100) NOT NULL,
+    os              VARCHAR(100) NOT NULL,
+    ip_address      VARCHAR(45),
+    user_agent      TEXT,
+    created_at      TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_used_at    TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    is_active       BOOLEAN DEFAULT TRUE,
+    UNIQUE (user_id, device_id)
+);
+
+CREATE INDEX idx_login_sessions_user_id ON login_sessions (user_id);
