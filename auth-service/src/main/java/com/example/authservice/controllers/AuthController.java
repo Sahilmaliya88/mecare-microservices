@@ -67,9 +67,10 @@ public class AuthController {
                         @ApiResponse(responseCode = "400", description = "Invalid request body")
         })
         @PostMapping("/register")
-        public ResponseEntity<?> registerUser(@RequestBody @Valid RegisterUserRequest registerUserRequest)
+        public ResponseEntity<?> registerUser(@RequestBody @Valid RegisterUserRequest registerUserRequest,
+                        HttpServletRequest request)
                         throws JsonProcessingException {
-                String token = authService.registerUser(registerUserRequest);
+                String token = authService.registerUser(registerUserRequest, request);
                 return ResponseEntity
                                 .ok(Map.of("status", true, "message", "user registered successfully!", "token", token));
         }
@@ -87,9 +88,9 @@ public class AuthController {
         @Operation(summary = "Verify profile", description = "Verify user profile via verification code.")
         @ApiResponse(responseCode = "200", description = "Verification successful", content = @Content(schema = @Schema(type = "object", example = "{ \"status\": true, \"message\": \"Verification successful\", \"token\": \"jwt-token\" }")))
         @PatchMapping("/verify-profile")
-        public ResponseEntity<?> verifyUser(@RequestBody @Valid VerifyRequest verifyRequest)
+        public ResponseEntity<?> verifyUser(@RequestBody @Valid VerifyRequest verifyRequest, HttpServletRequest request)
                         throws JsonProcessingException {
-                String token = authService.verifyUser(verifyRequest);
+                String token = authService.verifyUser(verifyRequest, request);
                 return ResponseEntity.ok(Map.of("status", true, "message", "Verification successful", "token", token));
         }
 
@@ -138,8 +139,8 @@ public class AuthController {
         @ApiResponse(responseCode = "200", description = "Logged in successfully", content = @Content(schema = @Schema(type = "object", example = "{ \"message\": \"logged in successfully\", \"token\": \"jwt-token\" }")))
         @PostMapping("social-login")
         public ResponseEntity<?> socialLoginController(@RequestBody @Valid SocialLoginRequest socialLoginRequestBody,
-                        HttpServletRequest request) {
-                String token = authService.socialLogin(socialLoginRequestBody);
+                        HttpServletRequest request) throws JsonProcessingException {
+                String token = authService.socialLogin(socialLoginRequestBody, request);
                 Map<String, Object> response = Map.of("message", "logged in successfully",
                                 "token", token);
                 return ResponseEntity.ok(response);
@@ -150,8 +151,8 @@ public class AuthController {
         @ApiResponse(responseCode = "200", description = "Role changed successfully", content = @Content(schema = @Schema(type = "object", example = "{ \"message\": \"role changed\" }")))
         @PatchMapping("/role")
         public ResponseEntity<Map<String, Object>> changeUserRoleController(
-                        @RequestBody @Valid ChangeUserRoleRequest changeUserRoleRequest) {
-                authService.changeUserRole(changeUserRoleRequest);
+                        @RequestBody @Valid ChangeUserRoleRequest changeUserRoleRequest, HttpServletRequest request) {
+                authService.changeUserRole(changeUserRoleRequest, request);
                 Map<String, Object> response = Map.of("message", "role changed");
                 return ResponseEntity.ok(response);
         }

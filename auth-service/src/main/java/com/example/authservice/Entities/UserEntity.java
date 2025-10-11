@@ -78,6 +78,6 @@ public class UserEntity {
     @Column(columnDefinition = "provider_id")
     private String providerId;
     // login sessions
-    @OneToMany(mappedBy = "user", fetch = FetchType.EAGER, orphanRemoval = true, cascade = jakarta.persistence.CascadeType.ALL)
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, orphanRemoval = true, cascade = jakarta.persistence.CascadeType.ALL)
     private List<LoginSessionEntity> loginSessions;
 }

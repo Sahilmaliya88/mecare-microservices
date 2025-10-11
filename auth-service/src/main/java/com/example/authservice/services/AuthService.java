@@ -30,7 +30,6 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
@@ -70,6 +69,7 @@ public class AuthService {
     private static final String IMPERSONATE_PREFIX = "impersonate-";
     private static final String IMPERSONATE_BY = "x-user-impersonate_by";
     private static final String IMPERSONATE = "x-user-impersonate";
+    private static final String DEVICE_ID_HEADER = "x-device-id";
     private final UserRepository userRepository;
     private final EmailService emailService;
     private final JWTService jwtService;
@@ -93,34 +93,53 @@ public class AuthService {
         this.sessionRepository = sessionRepository;
     }
 
-    public String registerUser(RegisterUserRequest registerUserRequest) throws JsonProcessingException {
-        // create hash of password
-        BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(12);
+    public String registerUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
+            throws JsonProcessingException {
         String hashedPassword = passwordEncoder.encode(registerUserRequest.getPassword());
         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
         String otp = generateOtp(6);
+        String ipAddr = getClientIp(request);
+
+        DeviceInfo deviceInfo = registerUserRequest.getDeviceInfo();
+        log.info("Register attempt from IP: {}, Device: {}, OS: {}, Browser: {}, User-Agent: {}",
+                ipAddr,
+                deviceInfo.getDeviceId(),
+                deviceInfo.getOs(),
+                deviceInfo.getBrowser(),
+                deviceInfo.getUserAgent());
         Date verificationCodeExpiresAt = new Date(new Date().getTime() + 15 * 60 * 1000);
-        // create user
-        UserEntity newUser = UserEntity.builder()
+        UserEntity newUser = userRepository.save(UserEntity.builder()
                 .email(registerUserRequest.getEmail())
                 .password(hashedPassword)
-                .token_version(tokenVersion)
                 .created_at(new Date())
                 .verification_code_expires_at(verificationCodeExpiresAt)
                 .verification_code(otp)
+                .build());
+        // save login session
+        LoginSessionEntity loginSession = LoginSessionEntity.builder()
+                .ipAddress(ipAddr)
+                .user(newUser)
+                .deviceId(deviceInfo.getDeviceId())
+                .deviceType(deviceInfo.getDeviceType())
+                .os(deviceInfo.getOs())
+                .browser(deviceInfo.getBrowser())
+                .userAgent(deviceInfo.getUserAgent())
+                .lastUsedAt(new Date())
+                .isActive(true)
+                .tokenVersion(tokenVersion)
                 .build();
-        // send verification code
-        userRepository.save(newUser);
+        sessionRepository.save(loginSession);
         // generate token and set version to redis
-        redisTemplate.opsForValue().set(VERSION_PREFIX + newUser.getEmail(), newUser.getToken_version());
-        String jwtToken = generateJwt(newUser);
+        redisTemplate.opsForHash().put(VERSION_PREFIX + newUser.getId(), deviceInfo.getDeviceId(),
+                tokenVersion);
+        String jwtToken = jwtService.getJwtTokenForSession(newUser, deviceInfo.getDeviceId(), tokenVersion);
         // save user
         emailService.sendWelcomeEmail(newUser);
         // return response
         return jwtToken;
     }
 
-    public String verifyUser(VerifyRequest verifyRequest) throws JsonProcessingException {
+    public String verifyUser(VerifyRequest verifyRequest, HttpServletRequest request) throws JsonProcessingException {
         UserEntity userEntity = userRepository.findByEmail(verifyRequest.getEmail())
                 .orElseThrow(() -> new Unauthorize("User not found with this email"));
         if (!Objects.equals(userEntity.getVerification_code(), verifyRequest.getOtp()))
@@ -130,11 +149,31 @@ public class AuthService {
         userEntity.setIs_verified(true);
         userEntity.setVerification_code(null);
         userEntity.setVerification_code_expires_at(null);
+
+        LoginSessionEntity loginSession = sessionRepository.findByUserAndDeviceId(userEntity,
+                verifyRequest.getDeviceId())
+                .orElseThrow(() -> new Unauthorize("No active session found for this device Please login again",
+                        HttpStatus.UNAUTHORIZED));
         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-        redisTemplate.opsForValue().set(VERSION_PREFIX + userEntity.getEmail(), tokenVersion);
-        userEntity.setToken_version(tokenVersion);
+        LoginSessionEntity session = LoginSessionEntity.builder()
+                .user(userEntity)
+                .deviceId(verifyRequest.getDeviceId())
+                .deviceType(loginSession.getDeviceType())
+                .os(loginSession.getOs())
+                .browser(loginSession.getBrowser())
+                .userAgent(loginSession.getUserAgent())
+                .ipAddress(getClientIp(request))
+                .isActive(true)
+                .tokenVersion(tokenVersion)
+                .lastUsedAt(new Date())
+                .build();
+        sessionRepository.deleteAllByUser(userEntity);
+        sessionRepository.save(session);
+        redisTemplate.delete(VERSION_PREFIX + userEntity.getId());
+        redisTemplate.opsForHash().put(VERSION_PREFIX + userEntity.getId(), session.getDeviceId(),
+                tokenVersion);
         userRepository.save(userEntity);
-        return jwtService.getJwtToken(userEntity);
+        return jwtService.getJwtTokenForSession(userEntity, verifyRequest.getDeviceId(), tokenVersion);
     }
 
     public String loginUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
@@ -305,14 +344,13 @@ public class AuthService {
             throw new InvalidLoginTypeException(
                     "You can not change password cause you registered with " + user.getProvider());
         }
-        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(12);
-        user.setPassword(encoder.encode(resetPasswordRequest.getPassword()));
+        user.setPassword(passwordEncoder.encode(resetPasswordRequest.getPassword()));
         user.setPassword_reset_token_expires_at(null);
         user.setPassword_reset_token(null);
-        user.setToken_version(null);
         user.setUpdated_at(new Date());
         // remove version from redis
-        redisTemplate.opsForValue().getAndDelete(VERSION_PREFIX + user.getEmail());
+        redisTemplate.delete(VERSION_PREFIX + user.getId());
+        sessionRepository.deleteAllByUser(user);
         try {
             userRepository.save(user);
         } catch (Exception e) {
@@ -327,9 +365,10 @@ public class AuthService {
      *                               received from user
      * @return {@link String} jwt token generated for that user
      */
-    public String socialLogin(SocialLoginRequest socialLoginRequestBody) {
+    public String socialLogin(SocialLoginRequest socialLoginRequestBody, HttpServletRequest request)
+            throws JsonProcessingException {
         if (Objects.requireNonNull(socialLoginRequestBody.getProvider()) == LoginProviders.GOOGLE) {
-            return googleOauthLogin(socialLoginRequestBody.getAccessToken());
+            return googleOauthLogin(socialLoginRequestBody, request);
         } else {
             throw new InvalidLoginTypeException("Current provider is not available");
         }
@@ -346,8 +385,8 @@ public class AuthService {
      * @throws RestClientException       if retrieves invalid response from Google
      * @throws RuntimeException          if failed to save user into database
      */
-    private String googleOauthLogin(String accessToken) {
-        if (accessToken.isBlank()) {
+    private String googleOauthLogin(SocialLoginRequest socialLoginRequest, HttpServletRequest request) {
+        if (socialLoginRequest.getAccessToken().isBlank()) {
             log.error("access token is missing");
             throw new IllegalArgumentException("access token is required");
         }
@@ -355,7 +394,7 @@ public class AuthService {
             String googleProfileApiUrl = "https://www.googleapis.com/oauth2/v2/userinfo";
             // prepare request entity
             HttpHeaders httpHeaders = new HttpHeaders();
-            httpHeaders.setBearerAuth(accessToken);
+            httpHeaders.setBearerAuth(socialLoginRequest.getAccessToken());
             HttpEntity<Void> httpEntity = new HttpEntity<>(httpHeaders);
             log.info("making google user profile request with {}", googleProfileApiUrl);
             // sends request to google for profile details
@@ -372,6 +411,7 @@ public class AuthService {
             if (googleProfile.getEmail() == null || googleProfile.getEmail().isBlank()) {
                 throw new IllegalArgumentException("Email is missing from google response");
             }
+            DeviceInfo deviceInfo = socialLoginRequest.getDeviceInfo();
             Optional<UserEntity> optionalUser = userRepository.findByEmail(googleProfile.getEmail());
             if (optionalUser.isPresent()) {
                 UserEntity user = optionalUser.get();
@@ -380,6 +420,7 @@ public class AuthService {
                 if (user.getProvider() != LoginProviders.GOOGLE) {
                     throw new InvalidLoginTypeException("Please login with " + user.getProvider());
                 }
+
                 // generate token version
                 String tokenVersion = Optional.ofNullable(user.getToken_version())
                         .orElseGet(() -> {
@@ -389,34 +430,57 @@ public class AuthService {
                             return version;
                         });
                 // save user
+                LoginSessionEntity loginSession = sessionRepository.findByUserAndDeviceId(user,
+                        deviceInfo.getDeviceId()).orElse(
+                                LoginSessionEntity.builder()
+                                        .browser(deviceInfo.getBrowser())
+                                        .deviceId(deviceInfo.getDeviceId())
+                                        .deviceType(deviceInfo.getDeviceType())
+                                        .isActive(true)
+                                        .user(user)
+                                        .os(deviceInfo.getOs())
+                                        .deviceType(deviceInfo.getDeviceType())
+                                        .userAgent(deviceInfo.getUserAgent())
+                                        .build());
+                loginSession.setLastUsedAt(new Date());
+                loginSession.setTokenVersion(tokenVersion);
+                loginSession.setIpAddress(getClientIp(request));
                 try {
+                    sessionRepository.save(loginSession);
                     userRepository.save(user);
                 } catch (RuntimeException e) {
                     log.error("failed to save user");
                     throw new RuntimeException(e);
                 }
-                redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), tokenVersion);
+                redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceInfo.getDeviceId(), tokenVersion);
                 // generate jwt and save user
-                return generateJwt(user);
+                return jwtService.getJwtTokenForSession(user, deviceInfo.getDeviceId(), tokenVersion);
             } else {
                 String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-                UserEntity user = UserEntity.builder()
+                UserEntity user = userRepository.save(UserEntity.builder()
                         .email(googleProfile.getEmail())
                         .provider(LoginProviders.GOOGLE)
                         .is_verified(true)
                         .providerId(googleProfile.getId())
                         .password(googleProfile.getId())
                         .role(UserRoles.USER)
-                        .token_version(tokenVersion)
+                        .build());
+                // save login session
+                LoginSessionEntity loginSession = LoginSessionEntity.builder()
+                        .browser(deviceInfo.getBrowser())
+                        .deviceId(deviceInfo.getDeviceId())
+                        .deviceType(deviceInfo.getDeviceType())
+                        .isActive(true)
+                        .user(user)
+                        .os(deviceInfo.getOs())
+                        .userAgent(deviceInfo.getUserAgent())
+                        .ipAddress(getClientIp(request))
+                        .tokenVersion(tokenVersion)
+                        .lastUsedAt(new Date())
                         .build();
-                try {
-                    userRepository.save(user);
-                } catch (RuntimeException e) {
-                    log.error("failed to save user");
-                    throw new RuntimeException(e);
-                }
-                redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), tokenVersion);
-                return generateJwt(user);
+                sessionRepository.save(loginSession);
+                redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceInfo.getDeviceId(), tokenVersion);
+                return jwtService.getJwtTokenForSession(user, deviceInfo.getDeviceId(), tokenVersion);
             }
         } catch (RestClientException e) {
             log.error("unexpected error encountered during request: {}", e.getMessage());
@@ -431,7 +495,7 @@ public class AuthService {
      * 
      * @param changeUserRoleRequest the request body {@link ChangeUserRoleRequest}
      */
-    public void changeUserRole(ChangeUserRoleRequest changeUserRoleRequest) {
+    public void changeUserRole(ChangeUserRoleRequest changeUserRoleRequest, HttpServletRequest request) {
         UserEntity operator = getAuthenticatedUser();
         if (operator == null) {
             throw new Unauthorize("Please login!");
@@ -440,6 +504,10 @@ public class AuthService {
             throw new SameUserException("You can not change own role");
         }
         log.info("operator rank is {}", operator.getRole().getRank());
+        String deviceId = request.getHeader(DEVICE_ID_HEADER);
+        if (deviceId == null || deviceId.isBlank()) {
+            throw new IllegalArgumentException("Device id is required in header");
+        }
         try {
             if (operator.getRole() == null || operator.getRole().equals(UserRoles.USER)
                     || operator.getRole().equals(UserRoles.DOCTOR)) {
@@ -460,7 +528,7 @@ public class AuthService {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-            String USER_VERSION_KEY = "version-" + user.getEmail();
+            String USER_VERSION_KEY = VERSION_PREFIX + user.getId();
             String redisTokenVersion = (String) redisTemplate.opsForValue().get(USER_VERSION_KEY);
             if (redisTokenVersion == null || redisTokenVersion.isBlank()) {
                 return;

@@ -6,8 +6,11 @@ import lombok.Data;
 
 @Data
 public class VerifyRequest {
-    @NotNull @Email
+    @NotNull
+    @Email
     private String email;
     @NotNull
     private String otp;
+    @NotNull
+    private String deviceId;
 }
