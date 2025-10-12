@@ -100,6 +100,8 @@ public class JWTFilter implements Ordered {
                             .header(ROLE_HEADER_KEY, role)
                             .header(VERIFIED_HEADER_KEY, Boolean.toString(verified))
                             .header(IMPERSONATE, Boolean.toString(true))
+                            .header(ID_HEADER_KEY, id)
+                            .header(DEVICE_ID_HEADER_KEY, deviceId)
                             .header(IMPERSONATE_BY, impersonateBy)
                             .build();
                     return chain.filter(exchange.mutate().request(modifiedRequest).build());

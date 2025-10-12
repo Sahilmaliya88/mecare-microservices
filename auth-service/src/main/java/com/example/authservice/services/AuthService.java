@@ -55,6 +55,7 @@ import com.example.authservice.utils.exceptions.Unauthorize;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -150,8 +151,8 @@ public class AuthService {
         userEntity.setVerification_code(null);
         userEntity.setVerification_code_expires_at(null);
 
-        LoginSessionEntity loginSession = sessionRepository.findByUserAndDeviceId(userEntity,
-                verifyRequest.getDeviceId())
+        LoginSessionEntity loginSession = sessionRepository.findByUserAndDeviceIdAndIsActive(userEntity,
+                verifyRequest.getDeviceId(), true)
                 .orElseThrow(() -> new Unauthorize("No active session found for this device Please login again",
                         HttpStatus.UNAUTHORIZED));
         String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
@@ -430,8 +431,8 @@ public class AuthService {
                             return version;
                         });
                 // save user
-                LoginSessionEntity loginSession = sessionRepository.findByUserAndDeviceId(user,
-                        deviceInfo.getDeviceId()).orElse(
+                LoginSessionEntity loginSession = sessionRepository.findByUserAndDeviceIdAndIsActive(user,
+                        deviceInfo.getDeviceId(), true).orElse(
                                 LoginSessionEntity.builder()
                                         .browser(deviceInfo.getBrowser())
                                         .deviceId(deviceInfo.getDeviceId())
@@ -529,19 +530,9 @@ public class AuthService {
                 throw new RuntimeException(e);
             }
             String USER_VERSION_KEY = VERSION_PREFIX + user.getId();
-            String redisTokenVersion = (String) redisTemplate.opsForValue().get(USER_VERSION_KEY);
-            if (redisTokenVersion == null || redisTokenVersion.isBlank()) {
-                return;
-            }
-            int dashIndex = redisTokenVersion.indexOf("-");
-            String updatedTokenForUser;
-            if (dashIndex != 1 && dashIndex == redisTokenVersion.length() - 2) {
-                updatedTokenForUser = redisTokenVersion.substring(0, dashIndex) + "-" + user.getRole().getRank();
-            } else {
-                updatedTokenForUser = redisTokenVersion + "-" + user.getRole().getRank();
-            }
             try {
-                redisTemplate.opsForValue().set(USER_VERSION_KEY, updatedTokenForUser);
+                sessionRepository.deleteAllByUser(user);
+                redisTemplate.delete(USER_VERSION_KEY);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -591,7 +582,8 @@ public class AuthService {
         }
     }
 
-    public String impersonateUser(String email) throws JsonProcessingException {
+    @Transactional
+    public String impersonateUser(String email, HttpServletRequest request) throws JsonProcessingException {
         if (email == null || email.isEmpty()) {
             throw new IllegalArgumentException("Invalid parameters");
         }
@@ -607,8 +599,34 @@ public class AuthService {
         if (targetUser.getRole().getRank() < performer.getRole().getRank()) {
             throw new Unauthorize("You can not impersonate your superior");
         }
-        long tokenVersion = ThreadLocalRandom.current().nextLong();
-        String updatedToken = jwtService.getJwtToken(targetUser, performer.getEmail(), Long.toString(tokenVersion));
+        String deviceId = request.getHeader(DEVICE_ID_HEADER);
+        if (deviceId == null || deviceId.isBlank()) {
+            throw new IllegalArgumentException("Device id is required in header");
+        }
+        String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
+        LoginSessionEntity session = sessionRepository.findByUserAndDeviceIdAndIsActive(performer, deviceId, true)
+                .orElseThrow(() -> new Unauthorize("No active session found for this device Please login again",
+                        HttpStatus.UNAUTHORIZED));
+        session.setIsActive(false);
+        session.setLastUsedAt(new Date());
+        session.setIpAddress(getClientIp(request));
+        LoginSessionEntity impersonateSession = LoginSessionEntity
+                .builder()
+                .browser(session.getBrowser())
+                .createdAt(new Date())
+                .deviceId(deviceId)
+                .deviceType(session.getDeviceType())
+                .tokenVersion(tokenVersion)
+                .ipAddress(getClientIp(request))
+                .os(session.getOs())
+                .user(targetUser)
+                .userAgent(session.getUserAgent())
+                .lastUsedAt(new Date())
+                .actualSession(session)
+                .impersonatedBy(performer)
+                .build();
+        sessionRepository.saveAll(List.of(impersonateSession, session));
+        String updatedToken = jwtService.getJwtToken(targetUser, performer.getEmail(), tokenVersion, deviceId);
         ListOperations<String, Object> listOps = redisTemplate.opsForList();
         String Key = IMPERSONATE_PREFIX + targetUser.getEmail();
         listOps.rightPush(Key, tokenVersion);
@@ -659,32 +677,40 @@ public class AuthService {
         if (versionStr == null) {
             throw new InvalidTokenException("Invalid or missing version in token");
         }
-
         long version;
         try {
             version = Long.parseLong(versionStr);
         } catch (NumberFormatException e) {
             throw new InvalidTokenException("Invalid version format in token");
         }
-
-        String redisKey = IMPERSONATE_PREFIX + request.getHeader(USER_EMAIL_HEADER);
-        List<Object> versions = redisTemplate.opsForList().range(redisKey, 0, -1);
-        if (versions == null || versions.isEmpty() || !versions.contains(version)) {
-            throw new InvalidTokenException("Invalid token version");
+        String userEmail = request.getHeader(USER_EMAIL_HEADER);
+        if (userEmail == null || userEmail.isBlank()) {
+            throw new RuntimeException("User email header is missing");
         }
-        log.info("Versions {}", versions.toString());
-        redisTemplate.opsForList().remove(redisKey, 1, version);
+        String deviceId = request.getHeader(DEVICE_ID_HEADER);
+        if (deviceId == null || deviceId.isBlank()) {
+            throw new RuntimeException("Device id is required in header");
+        }
+        UserEntity impersonatedUser = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new UserNotfoundException("User not found with email: " + userEmail));
 
+        String redisKey = IMPERSONATE_PREFIX + userEmail;
+        redisTemplate.opsForList().remove(redisKey, 1, String.valueOf(version));
         String actualUserEmail = request.getHeader(IMPERSONATE_BY);
         UserEntity user = userRepository.findByEmail(actualUserEmail)
                 .orElseThrow(() -> new UserNotfoundException("user not found with email: " + actualUserEmail));
-
-        long newTokenVersion = ThreadLocalRandom.current().nextLong();
-        redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), newTokenVersion);
-        user.setToken_version(Long.toString(newTokenVersion));
-        userRepository.save(user);
-
-        return jwtService.getJwtToken(user);
+        String newTokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
+        LoginSessionEntity actualSession = sessionRepository.findByUserAndDeviceIdAndIsActive(user, deviceId, false)
+                .orElseThrow(() -> new InvalidTokenException("No inactive session found for this device"));
+        actualSession.setIsActive(true);
+        actualSession.setLastUsedAt(new Date());
+        actualSession.setIpAddress(getClientIp(request));
+        actualSession.setTokenVersion(newTokenVersion);
+        int deactivedSessionCount = sessionRepository.deActiveSessionByUserAndDeviceId(impersonatedUser, deviceId);
+        log.info("deactivated {} sessions", deactivedSessionCount);
+        sessionRepository.save(actualSession);
+        redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceId, newTokenVersion);
+        return jwtService.getJwtTokenForSession(user, deviceId, newTokenVersion);
     }
 
     /**
@@ -700,9 +726,13 @@ public class AuthService {
      *                                   provider
      * @throws RuntimeException          if saving the updated user fails
      */
-    public String updatePassword(ChangePasswordRequest changePasswordRequest) {
+    public String updatePassword(ChangePasswordRequest changePasswordRequest, HttpServletRequest request) {
         if (changePasswordRequest.getNewPassword().isEmpty() || changePasswordRequest.getOldPassword().isEmpty()) {
             throw new IllegalArgumentException("Invalid argumets");
+        }
+        String deviceId = request.getHeader(DEVICE_ID_HEADER);
+        if (deviceId == null || deviceId.isBlank()) {
+            throw new IllegalArgumentException("Device id is required in header");
         }
         UserEntity user = getAuthenticatedUser();
         if (user == null) {
@@ -712,22 +742,47 @@ public class AuthService {
             throw new InvalidLoginTypeException(
                     "You can not change password cause you registered with " + user.getProvider());
         }
+
         if (!passwordEncoder.matches(changePasswordRequest.getOldPassword(), user.getPassword())) {
             throw new Unauthorize("Old password is incorrect");
         }
         if (passwordEncoder.matches(changePasswordRequest.getNewPassword(), user.getPassword())) {
             throw new IllegalArgumentException("New password must be different from old password");
         }
+
         user.setPassword(passwordEncoder.encode(changePasswordRequest.getNewPassword()));
         user.setUpdated_at(new Date());
-        if (changePasswordRequest.isLogoutFromOtherDevices() || user.getToken_version() == null) {
-            String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
-            user.setToken_version(tokenVersion);
-            redisTemplate.opsForValue().set(VERSION_PREFIX + user.getEmail(), tokenVersion);
+        LoginSessionEntity session = sessionRepository.findByUserAndDeviceIdAndIsActive(user, deviceId, true)
+                .orElseThrow(() -> new Unauthorize("No active session found for this device Please login again",
+                        HttpStatus.UNAUTHORIZED));
+        String tokenVersion;
+        if (changePasswordRequest.isLogoutFromOtherDevices()) {
+            tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
+            LoginSessionEntity newSession = LoginSessionEntity.builder()
+                    .browser(session.getBrowser())
+                    .createdAt(new Date())
+                    .deviceId(deviceId)
+                    .deviceType(session.getDeviceType())
+                    .tokenVersion(tokenVersion)
+                    .ipAddress(getClientIp(request))
+                    .os(session.getOs())
+                    .user(user)
+                    .userAgent(session.getUserAgent())
+                    .lastUsedAt(new Date())
+                    .build();
+            sessionRepository.deleteAllByUser(user);
+            sessionRepository.save(newSession);
+            redisTemplate.delete(VERSION_PREFIX + user.getId());
+            redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceId, tokenVersion);
+        } else {
+            tokenVersion = session.getTokenVersion();
+            session.setLastUsedAt(new Date());
+            session.setIpAddress(getClientIp(request));
+            sessionRepository.save(session);
         }
         try {
             userRepository.save(user);
-            return jwtService.getJwtToken(user);
+            return jwtService.getJwtTokenForSession(user, deviceId, tokenVersion);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -775,7 +830,8 @@ public class AuthService {
                 targetUser.setUpdated_at(new Date());
                 userRepository.save(targetUser);
             }
-            String USER_VERSION_KEY = VERSION_PREFIX + targetUser.getEmail();
+            String USER_VERSION_KEY = VERSION_PREFIX + targetUser.getId();
+            sessionRepository.deleteAllByUser(targetUser);
             redisTemplate.delete(USER_VERSION_KEY);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -859,10 +915,6 @@ public class AuthService {
         byte[] bytes = new byte[length];
         secureRandom.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private String generateJwt(UserEntity userEntity) throws JsonProcessingException {
-        return jwtService.getJwtToken(userEntity);
     }
 
     private String generateOtp(int size) {

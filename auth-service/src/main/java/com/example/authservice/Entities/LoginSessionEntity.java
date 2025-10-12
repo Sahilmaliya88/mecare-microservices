@@ -58,4 +58,12 @@ public class LoginSessionEntity {
     @Builder.Default
     @Column(name = "is_active")
     private Boolean isActive = true;
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "actual_session_id", referencedColumnName = "id")
+    @JsonBackReference
+    private LoginSessionEntity actualSession;
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JsonBackReference
+    @JoinColumn(name = "impersonated_by", referencedColumnName = "id")
+    private UserEntity impersonatedBy;
 }

@@ -178,9 +178,10 @@ public class AuthController {
         })
         @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN')")
         @GetMapping("/{email}/impersonate")
-        public ResponseEntity<Map<String, Object>> impersonateUser(@PathVariable @Email String email)
+        public ResponseEntity<Map<String, Object>> impersonateUser(@PathVariable @Email String email,
+                        HttpServletRequest request)
                         throws JsonProcessingException {
-                String token = authService.impersonateUser(email);
+                String token = authService.impersonateUser(email, request);
                 Map<String, Object> response = Map.of("status", true, "token", token);
                 return ResponseEntity.ok(response);
         }
@@ -217,8 +218,8 @@ public class AuthController {
         @PreAuthorize("isAuthenticated()")
         @PatchMapping("change-password")
         public ResponseEntity<Map<String, Object>> changePassword(
-                        @RequestBody @Valid ChangePasswordRequest changePasswordRequest) {
-                String token = authService.updatePassword(changePasswordRequest);
+                        @RequestBody @Valid ChangePasswordRequest changePasswordRequest, HttpServletRequest request) {
+                String token = authService.updatePassword(changePasswordRequest, request);
                 Map<String, Object> response = Map.of("status", true, "token", token);
                 return ResponseEntity.ok(response);
 
