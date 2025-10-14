@@ -1,5 +1,6 @@
 package com.example.authservice.controllers;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -27,6 +28,8 @@ import com.example.authservice.DTOS.UploadCsvRequest;
 import com.example.authservice.DTOS.VerifyRequest;
 import com.example.authservice.Entities.UserEntity;
 import com.example.authservice.services.AuthService;
+import com.example.authservice.utils.LoginProviders;
+import com.example.authservice.utils.UserRoles;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -230,6 +233,44 @@ public class AuthController {
                         @RequestParam(required = false) boolean hardDelete) {
                 authService.deleteUserByEmail(email, hardDelete);
                 Map<String, Object> response = Map.of("status", true, "message", "user deleted successfully");
+                return ResponseEntity.ok(response);
+        }
+
+        @Operation(summary = "Logout user", description = """
+                        Logs out the currently authenticated user.
+                        If 'allDevice' is true, logs out from all devices; otherwise, logs out from the current device only.
+                        Returns a success message upon completion.
+                        """, security = @SecurityRequirement(name = "bearerAuth"), responses = {
+                        @ApiResponse(responseCode = "200", description = "Logged out successfully", content = @Content(mediaType = "application/json", schema = @Schema(example = "{\"status\": true, \"message\": \"logged out successfully\"}"))),
+                        @ApiResponse(responseCode = "401", description = "Unauthorized — invalid or missing authentication"),
+                        @ApiResponse(responseCode = "500", description = "Server error while logging out")
+        })
+        @PreAuthorize("isAuthenticated()")
+        @DeleteMapping("/logout")
+        public ResponseEntity<Map<String, Object>> logoutUser(HttpServletRequest request,
+                        @RequestParam(required = false) boolean all_device) {
+                authService.logoutUser(request, all_device);
+                Map<String, Object> response = Map.of("status", true, "message", "logged out successfully");
+                return ResponseEntity.ok(response);
+        }
+
+        @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+        @GetMapping("/all")
+        public ResponseEntity<Map<String, Object>> getAllUsers(HttpServletRequest request,
+                        @RequestParam(required = false) UserRoles role,
+                        @RequestParam(required = false) String search,
+                        @RequestParam(required = true) Integer page,
+                        @RequestParam(required = true) Integer size,
+                        @RequestParam(required = false) List<String> sort_by,
+                        @RequestParam(required = false) String sort_dir,
+                        @RequestParam(required = false) Boolean is_active,
+                        @RequestParam(required = false) Boolean is_verified,
+                        @RequestParam(required = false) LoginProviders provider) {
+                var users = authService.getAllUsers(role, search, page, size, sort_by, sort_dir, is_active,
+                                is_verified, provider);
+                Map<String, Object> response = Map.of("status", true, "message", "users fetched successfully",
+                                "response",
+                                users);
                 return ResponseEntity.ok(response);
         }
 }

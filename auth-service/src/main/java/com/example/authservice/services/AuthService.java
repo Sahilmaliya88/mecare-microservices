@@ -18,6 +18,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.HttpEntity;
@@ -39,10 +43,12 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.authservice.DTOS.ChangePasswordRequest;
 import com.example.authservice.DTOS.ChangeUserRoleRequest;
 import com.example.authservice.DTOS.GoogleUserProfileResponse;
+import com.example.authservice.DTOS.PaginationResponse;
 import com.example.authservice.DTOS.RegisterUserRequest;
 import com.example.authservice.DTOS.ResetPasswordRequest;
 import com.example.authservice.DTOS.SocialLoginRequest;
 import com.example.authservice.DTOS.UploadCsvRequest;
+import com.example.authservice.DTOS.UsersResponse;
 import com.example.authservice.DTOS.VerifyRequest;
 import com.example.authservice.Entities.LoginSessionEntity;
 import com.example.authservice.Entities.UserEntity;
@@ -836,6 +842,86 @@ public class AuthService {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Logs out the authenticated user from the current device or all devices based
+     * on the allDevices flag.
+     *
+     * @param request    The HTTP request object containing headers.
+     * @param allDevices If true, logs out from all devices; if false, logs out
+     *                   from the current device only.
+     * @throws Unauthorize              if the user is not authenticated.
+     * @throws IllegalArgumentException if the device ID header is missing or
+     *                                  invalid.
+     * @throws RuntimeException         if any database or Redis operation fails.
+     */
+    public void logoutUser(HttpServletRequest request, boolean allDevices) {
+        UserEntity user = getAuthenticatedUser();
+        if (user == null) {
+            throw new Unauthorize("Please login!");
+        }
+        String deviceId = request.getHeader(DEVICE_ID_HEADER);
+        if (deviceId == null || deviceId.isBlank()) {
+            throw new IllegalArgumentException("Device id is required in header");
+        }
+
+        if (allDevices) {
+            int deactivatedSession = sessionRepository.deActiveSessionByUser(user);
+            log.info("deactivated {} sessions", deactivatedSession);
+            try {
+                redisTemplate.delete(VERSION_PREFIX + user.getId());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            return;
+        }
+        try {
+            redisTemplate.opsForHash().delete(VERSION_PREFIX + user.getId(), deviceId);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        int deactivedSessionCount = sessionRepository.deActiveSessionByUserAndDeviceId(user, deviceId);
+        log.info("deactivated {} sessions", deactivedSessionCount);
+
+    }
+
+    // var users = authService.getAllUsers(role, search, page, size, sort_by,
+    // sort_dir, is_active);
+    public PaginationResponse<UsersResponse> getAllUsers(UserRoles role, String search, int page, int size,
+            List<String> sort_by,
+            String sort_dir, Boolean is_active, Boolean is_verified, LoginProviders provider) {
+        if (page < 0 || size <= 0) {
+            throw new IllegalArgumentException("Invalid page or size parameters");
+        }
+        if (search == null) {
+            search = "";
+        }
+        Sort sort = Sort.unsorted();
+        List<Sort.Order> orders = new ArrayList<>();
+        if (sort_by != null && !sort_by.isEmpty()) {
+            for (String sortField : sort_by) {
+                if ("desc".equalsIgnoreCase(sort_dir)) {
+                    orders.add(Sort.Order.desc(sortField));
+                } else {
+                    orders.add(Sort.Order.asc(sortField));
+                }
+            }
+            sort = Sort.by(orders);
+        }
+        log.info("page {} and limit {}", page, size);
+        Pageable pageable = PageRequest.of(page, size, sort);
+        Page<UsersResponse> userPage = userRepository.findByFilters(search, role, is_active, is_verified, provider,
+                pageable);
+        log.info("Retrieved {} users", userPage.getNumberOfElements());
+        PaginationResponse<UsersResponse> response = PaginationResponse.<UsersResponse>builder()
+                .currentPageSize(userPage.getNumberOfElements())
+                .totalItems(userPage.getTotalElements())
+                .totalPages(userPage.getTotalPages())
+                .pageSize(size)
+                .data(userPage.getContent())
+                .build();
+        return response;
     }
 
     /**
