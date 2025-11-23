@@ -55,8 +55,8 @@ import com.example.authservice.Entities.UserEntity;
 import com.example.authservice.repositories.SessionRepository;
 import com.example.authservice.repositories.UserRepository;
 import com.example.authservice.utils.DeviceInfo;
-import com.example.authservice.utils.LoginProviders;
-import com.example.authservice.utils.UserRoles;
+import com.example.authservice.utils.enums.LoginProviders;
+import com.example.authservice.utils.enums.UserRoles;
 import com.example.authservice.utils.exceptions.Unauthorize;
 import com.fasterxml.jackson.core.JsonProcessingException;
 

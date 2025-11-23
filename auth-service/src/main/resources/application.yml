@@ -7,6 +7,10 @@ server:
 spring:
   environments:
     app-url: http://localhost:3000
+    image-kit:
+      privateKey: private_WAYBY5BdtuGhK8Jkh6mX907EajY=
+      publicKey: public_f6XvgRXEcvcNU5gCT88/8w0IzRE=
+      urlEndpoint: https://ik.imagekit.io/tbehxfhlf
   application:
     name: auth-service
   datasource:

@@ -2,8 +2,8 @@ package com.example.authservice.DTOS;
 
 import java.util.UUID;
 
-import com.example.authservice.utils.LoginProviders;
-import com.example.authservice.utils.UserRoles;
+import com.example.authservice.utils.enums.LoginProviders;
+import com.example.authservice.utils.enums.UserRoles;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

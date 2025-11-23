@@ -4,9 +4,10 @@ import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
-import com.example.authservice.utils.LoginProviders;
-import com.example.authservice.utils.UserRoles;
+import com.example.authservice.utils.enums.LoginProviders;
+import com.example.authservice.utils.enums.UserRoles;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -17,6 +18,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 import lombok.AllArgsConstructor;
@@ -78,6 +80,10 @@ public class UserEntity {
     @Column(columnDefinition = "provider_id")
     private String providerId;
     // login sessions
+    @JsonIgnore
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, orphanRemoval = true, cascade = jakarta.persistence.CascadeType.ALL)
     private List<LoginSessionEntity> loginSessions;
+    @OneToOne(mappedBy = "user", fetch = FetchType.EAGER, orphanRemoval = true, cascade = jakarta.persistence.CascadeType.ALL)
+    @JsonManagedReference
+    private UserProfileEntity userProfile;
 }

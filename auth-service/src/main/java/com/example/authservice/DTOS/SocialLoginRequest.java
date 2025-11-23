@@ -3,7 +3,7 @@ package com.example.authservice.DTOS;
 import java.util.Optional;
 
 import com.example.authservice.utils.DeviceInfo;
-import com.example.authservice.utils.LoginProviders;
+import com.example.authservice.utils.enums.LoginProviders;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

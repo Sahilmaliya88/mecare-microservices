@@ -28,8 +28,8 @@ import com.example.authservice.DTOS.UploadCsvRequest;
 import com.example.authservice.DTOS.VerifyRequest;
 import com.example.authservice.Entities.UserEntity;
 import com.example.authservice.services.AuthService;
-import com.example.authservice.utils.LoginProviders;
-import com.example.authservice.utils.UserRoles;
+import com.example.authservice.utils.enums.LoginProviders;
+import com.example.authservice.utils.enums.UserRoles;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import io.swagger.v3.oas.annotations.Operation;
