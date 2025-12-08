@@ -5,6 +5,10 @@ eureka:
 server:
   port: 8081
 spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   environments:
     app-url: http://localhost:3000
     image-kit:

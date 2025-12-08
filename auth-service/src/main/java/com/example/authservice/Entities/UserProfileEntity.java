@@ -53,6 +53,9 @@ public class UserProfileEntity {
     private String bio;
     @Column(name = "profile_picture_url")
     private String profilePictureUrl;
+    @JsonIgnore
+    @Column(name = "file_id")
+    private String fileId;
     @Enumerated(EnumType.STRING)
     private Gender gender;
     @Column(name = "gender_other_title")
