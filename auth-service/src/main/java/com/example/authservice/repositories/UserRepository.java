@@ -22,9 +22,9 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
         @Query("select u from UserEntity u where u.password_reset_token = :token and u.password_reset_token_expires_at > :now")
         Optional<UserEntity> findByValidPasswordResetToken(@Param("token") String token, @Param("now") Date now);
 
-        @Query("SELECT new com.example.authservice.DTOS.UsersResponse(u.id, u.email, u.role, u.is_verified, u.provider) "
-                        + "FROM UserEntity u "
-                        + "WHERE (:search IS NULL OR LOWER(u.email) LIKE LOWER(CONCAT('%', :search,'%'))) "
+        @Query("SELECT new com.example.authservice.DTOS.UsersResponse(u.id, u.email, u.role, u.is_verified, u.provider,up) "
+                        + "FROM UserEntity u left JOIN u.userProfile up "
+                        + "WHERE (:search IS NULL OR LOWER(u.email) LIKE LOWER(CONCAT('%', :search,'%')))"
                         + "AND (:role IS NULL OR u.role = :role) "
                         + "AND (:isVerified IS NULL OR u.is_verified = :isVerified)"
                         + "AND (:isActive IS NULL OR u.isActive = :isActive)"

@@ -1,7 +1,9 @@
 package com.example.authservice.services;
 
 import java.io.IOException;
+import java.time.ZoneId;
 import java.util.Date;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -25,12 +27,13 @@ import io.imagekit.sdk.exceptions.UnauthorizedException;
 import io.imagekit.sdk.exceptions.UnknownException;
 import io.imagekit.sdk.models.FileCreateRequest;
 import io.imagekit.sdk.models.results.Result;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
 public class UserService {
-
+    private static long MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
     private final String PROFILE_FOLDER_NAME = "/profile-photos/";
     private final UserProfileRepository userProfileRepository;
     private final AuthService authService;
@@ -52,6 +55,7 @@ public class UserService {
      * @throws IllegalArgumentException if other gender title is not provided when
      *                                  gender is OTHER
      */
+    @Transactional
     public void createUserProfile(UserProfileRequest request, UUID userId) {
         // other gender validation
         if (request.getGender() == Gender.OTHER
@@ -59,20 +63,10 @@ public class UserService {
             throw new IllegalArgumentException("Other gender title must be provided when gender is OTHER");
         }
 
-        UserEntity user;
-        if (userId == null) {
-            user = authService.getAuthenticatedUser();
-        } else {
-            UserEntity me = authService.getAuthenticatedUser();
-            if (!isAdmin(me)) {
-                throw new Unauthorize("Only admin can create profile for other users");
-            }
-            user = userRepository.findById(userId)
-                    .orElseThrow(() -> new AuthService.UserNotfoundException("User not found"));
-        }
+        UserEntity user = getUserForOperation(userId);
         boolean exists = userProfileRepository.existsByUserId(user.getId());
         if (exists) {
-            throw new IllegalStateException("User profile already exists");
+            throw new UserProfileAlreadyExistsException("User profile already exists");
         }
         Result imageResult = null;
         if (request.getFile() != null && !request.getFile().isEmpty()) {
@@ -104,33 +98,82 @@ public class UserService {
         log.info("User profile created for userId: {}", user.getId());
     }
 
-    public void UploadProfilePicture(MultipartFile image, UUID userId) throws IOException, InternalServerException,
-            BadRequestException, UnknownException, ForbiddenException, TooManyRequestsException, UnauthorizedException {
-        UserEntity user;
-        if (userId == null) {
-            user = authService.getAuthenticatedUser();
-        } else {
-            UserEntity me = authService.getAuthenticatedUser();
-            if (!isAdmin(me)) {
-                throw new Unauthorize("Only admin can upload profile picture for other users");
+    /**
+     * Update user profile
+     * 
+     * @param request UserProfileRequest
+     * @return void
+     * @throws UserProfileNotfoundException if user profile not found
+     */
+    @Transactional
+    public void updateUserProfile(UserProfileRequest request, UUID userId) {
+        // Implementation for updating user profile
+        UserEntity user = getUserForOperation(userId);
+        UserProfileEntity userProfile = user.getUserProfile();
+        if (userProfile == null) {
+            throw new UserProfileNotfoundException("User profile does not exist");
+        }
+        // upload new file if provided
+        if (request.getFile() != null && !request.getFile().isEmpty()) {
+            try {
+                Result uploadFileResponse = uploadFileToImagekit(request.getFile(), userProfile.getFileId());
+                userProfile.setProfilePictureUrl(uploadFileResponse.getUrl());
+                userProfile.setFileId(uploadFileResponse.getFileId());
+            } catch (ForbiddenException | TooManyRequestsException | InternalServerException | UnauthorizedException
+                    | BadRequestException | UnknownException | IOException e) {
+                log.error("error occured in update profile", e.getMessage());
+                throw new ProfilePictureException(e.getMessage(), e);
             }
-            user = userRepository.findById(userId)
-                    .orElseThrow(() -> new AuthService.UserNotfoundException("User not found"));
+        }
+        Optional.ofNullable(request.getFirstName()).ifPresent(userProfile::setFirstName);
+        Optional.ofNullable(request.getLastName()).ifPresent(userProfile::setLastName);
+        Optional.ofNullable(request.getPhoneNumber()).ifPresent(userProfile::setPhoneNumber);
+        Optional.ofNullable(request.getDateOfBirth()).ifPresent(
+                dob -> userProfile.setDateOfBirth(Date.from(dob.atStartOfDay(ZoneId.systemDefault()).toInstant())));
+        Optional.ofNullable(request.getBio()).ifPresent(userProfile::setBio);
+        Optional.ofNullable(request.getGender()).ifPresent(userProfile::setGender);
+        Optional.ofNullable(request.getOtherGenderTitle()).ifPresent(userProfile::setGenderOtherTitle);
+        userProfile.setUpdatedAt(new Date());
+        userProfileRepository.save(userProfile);
+        log.info("User profile updated for userId: {}", user.getId());
+    }
+
+    /**
+     * Delete user profile
+     * 
+     * @param userId
+     * @return void
+     * @throws UserProfileNotfoundException if user profile not found
+     * @throws Unauthorize                  if trying to delete profile of higher
+     *                                      role
+     * @throws ProfilePictureException      if error occurs while deleting profile
+     *                                      picture
+     */
+    @Transactional
+    public void deleteUserProfile(UUID userId) {
+        // Implementation for deleting user profile
+        UserEntity user = getUserForOperation(userId);
+        UserEntity me = authService.getAuthenticatedUser();
+        if (user.getRole().getRank() <= me.getRole().getRank()) {
+            throw new Unauthorize("You are not authorized to delete the profile of a user with a higher role.");
         }
         UserProfileEntity userProfile = user.getUserProfile();
         if (userProfile == null) {
-            throw new IllegalStateException("User profile does not exist");
+            throw new UserProfileNotfoundException("User profile does not exist");
         }
-        Result imageResponse = uploadFileToImagekit(image, userProfile.getFileId());
-        log.info("Image uploaded to ImageKit with URL: {}", imageResponse.getUrl());
-        if (imageResponse.getUrl() != null) {
-            userProfile.setProfilePictureUrl(imageResponse.getUrl());
-            userProfile.setFileId(imageResponse.getFileId());
-            userProfileRepository.save(userProfile);
-            log.info("User profile picture updated for userId: {}", user.getId());
-        } else {
-            throw new RuntimeException("Failed to upload image");
+        if (userProfile.getFileId() != null && !userProfile.getFileId().isBlank()) {
+            try {
+                ImageKit.getInstance().deleteFile(userProfile.getFileId());
+                log.info("Deleted profile picture from ImageKit for userId: {}", user.getId());
+            } catch (ForbiddenException | TooManyRequestsException | InternalServerException | UnauthorizedException
+                    | BadRequestException | UnknownException e) {
+                log.error("Error deleting profile picture from ImageKit: {}", e.getMessage());
+                throw new ProfilePictureException("Failed to delete profile picture image", e);
+            }
         }
+        user.setUserProfile(null);
+        userRepository.save(user);
+        log.info("User profile deleted for userId: {}", user.getId());
     }
 
     /**
@@ -156,7 +199,7 @@ public class UserService {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File must not be null or empty");
         }
-
+        checkMaxFileSize(file);
         String trimmedExistingId = existingId == null ? "" : existingId.trim();
         if (!trimmedExistingId.isEmpty()) {
             ImageKit.getInstance().deleteFile(trimmedExistingId);
@@ -172,7 +215,68 @@ public class UserService {
         return result;
     }
 
+    /**
+     * Retrieves the user entity for the operation based on the provided userId.
+     * 
+     * @param userId
+     * @return {@link UserEntity} userEntity object if another user or authenticated
+     *         user
+     * @throws Unauthorize                       if the authenticated user is not
+     *                                           admin and trying to access other
+     *                                           user's data
+     * @throws AuthService.UserNotfoundException if the user is not found
+     */
+    private UserEntity getUserForOperation(UUID userId) {
+        UserEntity user;
+        if (userId == null) {
+            user = authService.getAuthenticatedUser();
+        } else {
+            UserEntity me = authService.getAuthenticatedUser();
+            if (!isAdmin(me)) {
+                throw new Unauthorize("Only admin can perform this operation for other users");
+            }
+            user = userRepository.findById(userId)
+                    .orElseThrow(() -> new AuthService.UserNotfoundException("User not found"));
+        }
+        return user;
+    }
+
     public boolean isAdmin(UserEntity user) {
         return user.getRole().equals(UserRoles.ADMIN) || user.getRole().equals(UserRoles.SUPER_ADMIN);
+
+    }
+
+    public void checkMaxFileSize(MultipartFile file) {
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new InvalidFileException("File size exceeds the maximum limit of 2 MB");
+        }
+    }
+
+    public static class UserProfileNotfoundException extends RuntimeException {
+        public UserProfileNotfoundException(String message) {
+            super(message);
+        }
+    }
+
+    public static class UserProfileAlreadyExistsException extends RuntimeException {
+        public UserProfileAlreadyExistsException(String message) {
+            super(message);
+        }
+    }
+
+    public static class InvalidFileException extends RuntimeException {
+        public InvalidFileException(String message) {
+            super(message);
+        }
+    }
+
+    public static class ProfilePictureException extends RuntimeException {
+        public ProfilePictureException(String message) {
+            super(message);
+        }
+
+        public ProfilePictureException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

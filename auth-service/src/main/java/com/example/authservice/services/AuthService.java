@@ -975,7 +975,7 @@ public class AuthService {
      */
     public boolean checkUserCanChangeRole(UserRoles performerRole, UserRoles currentUserRole, UserRoles targetRole) {
         if (performerRole == null || currentUserRole == null || targetRole == null) {
-            throw new IllegalArgumentException("Invalid parameter to perform this action");
+            throw new IllegalArgumentException("Invalid Role to perform this action");
         }
         int indexOfPerformerRole = performerRole.getRank();
         int indexOfUserRole = currentUserRole.getRank();
