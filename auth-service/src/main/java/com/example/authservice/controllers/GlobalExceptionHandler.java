@@ -5,10 +5,13 @@ import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.client.RestClientException;
 
+import com.example.authservice.services.ActionService;
 import com.example.authservice.services.AuthService;
 import com.example.authservice.services.EmailService;
 import com.example.authservice.services.UserService;
@@ -79,6 +82,26 @@ public class GlobalExceptionHandler {
                                                 "status", false,
                                                 "error", "Unauthorized",
                                                 "message", message,
+                                                "path", request.getRequestURI()));
+        }
+
+        @ExceptionHandler(MethodArgumentNotValidException.class)
+        public ResponseEntity<Map<String, Object>> handleValidationException(HttpServletRequest request,
+                        MethodArgumentNotValidException e) {
+                Map<String, String> fieldErrors = e.getBindingResult()
+                                .getFieldErrors()
+                                .stream()
+                                .collect(
+                                                java.util.stream.Collectors.toMap(
+                                                                FieldError::getField,
+                                                                FieldError::getDefaultMessage));
+
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                                Map.of(
+                                                "status", false,
+                                                "error", "Validation Error",
+                                                "message", "Validation failed for one or more fields",
+                                                "fieldErrors", fieldErrors,
                                                 "path", request.getRequestURI()));
         }
 
@@ -186,6 +209,18 @@ public class GlobalExceptionHandler {
                                 Map.of(
                                                 "status", false,
                                                 "error", "Profile picture upload failed!",
+                                                "message", message,
+                                                "path", request.getRequestURI()));
+        }
+
+        @ExceptionHandler(ActionService.CategoryAlreadyExistsException.class)
+        public ResponseEntity<Map<String, Object>> handleCategoryAlreadyExistsException(HttpServletRequest request,
+                        ActionService.CategoryAlreadyExistsException e) {
+                String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                                Map.of(
+                                                "status", false,
+                                                "error", "Category already exists!",
                                                 "message", message,
                                                 "path", request.getRequestURI()));
         }

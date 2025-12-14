@@ -3,6 +3,7 @@ package com.example.authservice.controllers;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,7 @@ import com.example.authservice.DTOS.RegisterUserRequest;
 import com.example.authservice.DTOS.ResetPasswordRequest;
 import com.example.authservice.DTOS.SocialLoginRequest;
 import com.example.authservice.DTOS.UploadCsvRequest;
+import com.example.authservice.DTOS.UsersResponse;
 import com.example.authservice.DTOS.VerifyRequest;
 import com.example.authservice.Entities.UserEntity;
 import com.example.authservice.services.AuthService;
@@ -43,6 +45,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -50,7 +54,7 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @RequestMapping("/api/v1/auth")
 @Tag(name = "Authentication API", description = "Endpoints for user authentication and profile management")
-public class AuthController {
+public class authController {
 
         @Autowired
         private AuthService authService;
@@ -259,8 +263,8 @@ public class AuthController {
         public ResponseEntity<Map<String, Object>> getAllUsers(HttpServletRequest request,
                         @RequestParam(required = false) UserRoles role,
                         @RequestParam(required = false) String search,
-                        @RequestParam(required = true) Integer page,
-                        @RequestParam(required = true) Integer size,
+                        @RequestParam(required = true) @Min(0) Integer page,
+                        @RequestParam(required = true) @Min(0) @Max(100) Integer size,
                         @RequestParam(required = false) List<String> sort_by,
                         @RequestParam(required = false) String sort_dir,
                         @RequestParam(required = false) Boolean is_active,
@@ -271,6 +275,15 @@ public class AuthController {
                 Map<String, Object> response = Map.of("status", true, "message", "users fetched successfully",
                                 "response",
                                 users);
+                return ResponseEntity.ok(response);
+        }
+
+        @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+        @GetMapping("/get-user/{id}")
+        public ResponseEntity<Map<String, Object>> getUserById(@PathVariable @NotNull String id) {
+                UsersResponse user = authService.getUserById(UUID.fromString(id));
+                Map<String, Object> response = Map.of("status", true, "message", "user fetched successfully",
+                                "user", user);
                 return ResponseEntity.ok(response);
         }
 }

@@ -118,4 +118,36 @@ public class UserController {
         Map<String, Object> response = Map.of("message", "User profile deleted successfully", "status", true);
         return ResponseEntity.ok(response);
     }
+
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Delete user profile picture", description = "API to delete user profile picture")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "User profile picture deleted successfully"),
+            @ApiResponse(responseCode = "400", description = "Bad request"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @DeleteMapping("/profile-picture/delete")
+    public ResponseEntity<?> deleteProfilePicture() {
+        log.info("Received request to delete user profile picture");
+        userService.deleteUserProfileImage(null);
+        Map<String, Object> response = Map.of("message", "User profile picture deleted successfully", "status", true);
+        return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN')")
+    @Operation(summary = "Delete user profile picture by admin", description = "API to delete user profile picture by admin")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "User profile picture deleted successfully"),
+            @ApiResponse(responseCode = "400", description = "Bad request"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @DeleteMapping("{user_id}/profile-picture/delete")
+    public ResponseEntity<?> deleteProfilePictureByAdmin(@PathVariable("user_id") @NotBlank String userId) {
+        log.info("Received request to delete user profile picture for userId: {}", userId);
+        userService.deleteUserProfileImage(UUID.fromString(userId));
+        Map<String, Object> response = Map.of("message", "User profile picture deleted successfully", "status", true);
+        return ResponseEntity.ok(response);
+    }
 }

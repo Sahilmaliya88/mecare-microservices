@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.commons.csv.CSVFormat;
@@ -58,14 +59,17 @@ import com.example.authservice.utils.DeviceInfo;
 import com.example.authservice.utils.enums.LoginProviders;
 import com.example.authservice.utils.enums.UserRoles;
 import com.example.authservice.utils.exceptions.Unauthorize;
+import com.example.authservice.utils.mappers.UserMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AuthService {
     private static final String NUMBERS = "0123456789";
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -85,20 +89,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final RestTemplate restTemplate;
     private final SessionRepository sessionRepository;
-
-    public AuthService(UserRepository userRepository, EmailService emailService, JWTService jwtService,
-            PasswordEncoder passwordEncoder, RedisTemplate<String, Object> redisTemplate,
-            AuthenticationManager authenticationManager, RestTemplate restTemplate,
-            SessionRepository sessionRepository) {
-        this.userRepository = userRepository;
-        this.emailService = emailService;
-        this.jwtService = jwtService;
-        this.passwordEncoder = passwordEncoder;
-        this.redisTemplate = redisTemplate;
-        this.authenticationManager = authenticationManager;
-        this.restTemplate = restTemplate;
-        this.sessionRepository = sessionRepository;
-    }
+    private final UserMapper userMapper;
 
     public String registerUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
             throws JsonProcessingException {
@@ -922,6 +913,21 @@ public class AuthService {
                 .data(userPage.getContent())
                 .build();
         return response;
+    }
+
+    public UsersResponse getUserById(UUID id) {
+        if (id == null || id.toString().isEmpty()) {
+            throw new IllegalArgumentException("Invalid parameters");
+        }
+        UserEntity user = userRepository.findUserById(id)
+                .orElseThrow(() -> new UserNotfoundException("User not found with email: " + id));
+
+        UsersResponse userResponse = userMapper.tUsersResponse(user);
+        if (userResponse == null) {
+            throw new UserNotfoundException("User not found with id: " + id);
+        }
+        // will add more details as per requirement and role
+        return userResponse;
     }
 
     /**

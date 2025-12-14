@@ -14,6 +14,8 @@ public class Routes {
                                                 .uri("lb://auth-service"))
                                 .route("user-service", r -> r.path("/api/v1/user/**")
                                                 .uri("lb://auth-service"))
+                                .route("actions-service", r -> r.path("/api/v1/actions/**")
+                                                .uri("lb://auth-service"))
                                 .route("auth-service-docs", p -> p.path("/aggregate/auth-service/v3/api-docs")
                                                 .filters(f -> f.rewritePath("/aggregate/auth-service/v3/api-docs",
                                                                 "/v3/api-docs"))

@@ -176,6 +176,49 @@ public class UserService {
         log.info("User profile deleted for userId: {}", user.getId());
     }
 
+    @Transactional
+    /**
+     * Deletes the profile image of a user from ImageKit and updates the
+     * 
+     * @param userId the ID of the user whose profile image is to be deleted and
+     *               null if self opration
+     * @return void
+     * @throws Unauthorize                  if the authenticated user is not admin
+     *                                      and trying to
+     *                                      delete another user's profile image
+     * 
+     * @throws UserProfileNotfoundException if the user profile does not exist
+     * @throws ProfilePictureException      if an error occurs while deleting the
+     *                                      profile picture from ImageKit
+     * @throws ForbiddenException           if the request is forbidden
+     * @throws TooManyRequestsException     if too many requests are made to
+     *                                      ImageKit
+     * @throws InternalServerException      if an internal server error occurs
+     * @throws UnauthorizedException        if the request is unauthorized
+     * @throws BadRequestException          if the request is invalid
+     * @throws UnknownException             if an unknown error occurs
+     */
+    public void deleteUserProfileImage(UUID userId) {
+        UserEntity user = getUserForOperation(userId);
+        UserProfileEntity userProfile = user.getUserProfile();
+        if (userProfile == null) {
+            throw new UserProfileNotfoundException("User profile does not exist");
+        }
+        if (userProfile.getFileId() != null && !userProfile.getFileId().isBlank()) {
+            try {
+                ImageKit.getInstance().deleteFile(userProfile.getFileId());
+                log.info("Deleted profile picture from ImageKit for userId: {}", user.getId());
+            } catch (ForbiddenException | TooManyRequestsException | InternalServerException | UnauthorizedException
+                    | BadRequestException | UnknownException e) {
+                log.error("Error deleting profile picture from ImageKit: {}", e.getMessage());
+                throw new ProfilePictureException("Failed to delete profile picture image", e);
+            }
+            userProfile.setFileId(null);
+            userProfile.setProfilePictureUrl(null);
+            userProfileRepository.save(userProfile);
+        }
+    }
+
     /**
      * Uploads a file to ImageKit and deletes the existing file if an ID is
      * provided.

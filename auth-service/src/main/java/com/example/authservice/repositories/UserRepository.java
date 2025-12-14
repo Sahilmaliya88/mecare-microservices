@@ -33,4 +33,7 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
                         @Param("isActive") Boolean isActive, @Param("isVerified") Boolean isVerified,
                         @Param("provider") LoginProviders provider,
                         Pageable pageable);
+
+        @Query("SELECT u FROM UserEntity  u left join u.userProfile WHERE u.id = :id")
+        Optional<UserEntity> findUserById(@Param("id") UUID id);
 }
