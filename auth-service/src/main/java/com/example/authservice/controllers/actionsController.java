@@ -1,22 +1,31 @@
 package com.example.authservice.controllers;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.service.annotation.DeleteExchange;
+import org.springframework.web.service.annotation.PatchExchange;
 
+import com.example.authservice.DTOS.ActionCategoryEditRequest;
 import com.example.authservice.DTOS.ActionCategoryRequest;
+import com.example.authservice.Entities.AuditActionCategoryEntity;
 import com.example.authservice.services.ActionService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
@@ -40,4 +49,66 @@ public class actionsController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @Operation(summary = "Get All Action Categories", description = "Retrieves all action categories from the audit system")
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Action categories retrieved successfully"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Action categories not found")
+    })
+    @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+    @GetMapping("/categories/all")
+    public ResponseEntity<?> getAllCategories(@RequestParam(defaultValue = "false") boolean include_deleted) {
+        List<AuditActionCategoryEntity> categories = actionService.getAllCategories(include_deleted);
+        Map<String, Object> response = Map.of("status", true, "message", "Action categories retrieved successfully",
+                "total_categories", categories.size(),
+                "data", categories);
+        return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+    @Operation(summary = "Edit Action Category", description = "Edits an existing action category in the audit system")
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Action category edited successfully"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Action category not found")
+    })
+    @PatchExchange("/categories/edit/{code}")
+    public ResponseEntity<?> editCategory(@PathVariable @NotNull(message = "Code is required") String code,
+            @RequestBody @Valid ActionCategoryEditRequest request) {
+        actionService.editCategory(request, code);
+        Map<String, Object> response = Map.of("status", true, "message", "Action category edited successfully");
+        return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+    @Operation(summary = "Delete Action Category", description = "Deletes an existing action category in the audit system")
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Action category deleted successfully"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Action category not found")
+    })
+    @DeleteExchange("/categories/delete/{code}")
+    public ResponseEntity<?> deleteCategory(@PathVariable @NotNull(message = "Code is required") String code) {
+        actionService.deleteCategory(code);
+        Map<String, Object> response = Map.of("status", true, "message", "Action category deleted successfully");
+        return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+    @Operation(summary = "Restore Action Category", description = "Restores a deleted action category in the audit system")
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Action category restored successfully"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Action category not found")
+    })
+    @PatchExchange("/categories/restore/{code}")
+    public ResponseEntity<?> restoreCategory(@PathVariable @NotNull(message = "Code is required") String code) {
+        actionService.restoreCategory(code);
+        Map<String, Object> response = Map.of("status", true, "message", "Action category restored successfully");
+        return ResponseEntity.ok(response);
+    }
 }

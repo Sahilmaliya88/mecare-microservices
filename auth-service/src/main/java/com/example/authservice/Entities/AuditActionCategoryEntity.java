@@ -5,6 +5,7 @@ import java.util.Date;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
@@ -36,10 +37,13 @@ public class AuditActionCategoryEntity {
     private String title;
     private String description;
     @Builder.Default
+    @JsonIgnore
     private boolean is_deleted = false;
     @Builder.Default
+    @JsonIgnore
     private Date created_at = new Date();
     @JsonBackReference
+    @JsonIgnore
     @OneToMany(mappedBy = "category", fetch = FetchType.LAZY, orphanRemoval = true, cascade = CascadeType.ALL)
     private List<AuditActions> auditActions;
 }
