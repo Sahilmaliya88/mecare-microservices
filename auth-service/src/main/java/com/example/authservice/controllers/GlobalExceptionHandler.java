@@ -224,4 +224,52 @@ public class GlobalExceptionHandler {
                                                 "message", message,
                                                 "path", request.getRequestURI()));
         }
+
+        @ExceptionHandler(ActionService.CategoryNotFoundException.class)
+        public ResponseEntity<Map<String, Object>> handleCategoryNotFoundException(HttpServletRequest request,
+                        ActionService.CategoryNotFoundException e) {
+                String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                                Map.of(
+                                                "status", false,
+                                                "error", "Category not found!",
+                                                "message", message,
+                                                "path", request.getRequestURI()));
+        }
+
+        @ExceptionHandler(ActionService.ActionAlreadyExistsException.class)
+        public ResponseEntity<Map<String, Object>> handleActionAlreadyExistsException(HttpServletRequest request,
+                        ActionService.ActionAlreadyExistsException e) {
+                String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                                Map.of(
+                                                "status", false,
+                                                "error", "Action already exists!",
+                                                "message", message,
+                                                "path", request.getRequestURI()));
+        }
+
+        @ExceptionHandler(ActionService.ActionNotFoundException.class)
+        public ResponseEntity<Map<String, Object>> handleActionNotFoundException(HttpServletRequest request,
+                        ActionService.ActionNotFoundException e) {
+                String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                                Map.of(
+                                                "status", false,
+                                                "error", "Action not found!",
+                                                "message", message,
+                                                "path", request.getRequestURI()));
+        }
+
+        @ExceptionHandler(ActionService.ActionNotDeletedException.class)
+        public ResponseEntity<Map<String, Object>> handleActionNotDeletedException(HttpServletRequest request,
+                        ActionService.ActionNotDeletedException e) {
+                String message = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                                Map.of(
+                                                "status", false,
+                                                "error", "Action not deleted!",
+                                                "message", message,
+                                                "path", request.getRequestURI()));
+        }
 }

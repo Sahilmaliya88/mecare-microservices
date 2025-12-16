@@ -2,6 +2,7 @@ package com.example.authservice.services;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -9,7 +10,11 @@ import org.springframework.stereotype.Service;
 
 import com.example.authservice.DTOS.ActionCategoryEditRequest;
 import com.example.authservice.DTOS.ActionCategoryRequest;
+import com.example.authservice.DTOS.ActionEditRequest;
+import com.example.authservice.DTOS.ActionRequest;
+import com.example.authservice.DTOS.ActionResponse;
 import com.example.authservice.Entities.AuditActionCategoryEntity;
+import com.example.authservice.Entities.AuditActions;
 import com.example.authservice.repositories.ActionCategoryRepository;
 import com.example.authservice.repositories.AuditActionRepository;
 
@@ -90,12 +95,116 @@ public class ActionService {
         actionCategoryRepository.save(category);
     }
 
+    @Transactional
+    @CacheEvict(value = "audit-actions", allEntries = true)
+    public void createAction(ActionRequest request) {
+        if (request.getCategoryCode() == null || request.getCategoryCode().isBlank()) {
+            throw new IllegalArgumentException("Category code is required");
+        }
+        if (isActionExists(request.getCode())) {
+            throw new ActionAlreadyExistsException("Action with code " + request.getCode() + " already exists!");
+        }
+        AuditActionCategoryEntity category = actionCategoryRepository
+                .findById(request.getCategoryCode())
+                .orElseThrow(() -> new CategoryNotFoundException(
+                        "Category with code " + request.getCategoryCode() + " not exists!"));
+        if (category.is_deleted()) {
+            throw new CategoryDeletedException("Category with code " + request.getCategoryCode() + " is deleted!");
+        }
+        AuditActions action = AuditActions.builder()
+                .code(request.getCode())
+                .title(request.getTitle())
+                .description(request.getDescription())
+                .category(category)
+                .created_at(new Date())
+                .build();
+        auditActionRepository.save(action);
+
+    }
+
+    @Cacheable(value = "audit-actions", unless = "#include_deleted || #include_deleted_category || #categoryCodes != null")
+    public List<ActionResponse> getAllActions(boolean include_deleted_category, boolean include_deleted,
+            String[] categoryCodes) {
+        return auditActionRepository.findAllActiveActions(categoryCodes, include_deleted_category, include_deleted);
+    }
+
+    @Transactional
+    @CacheEvict(value = "audit-actions", allEntries = true)
+    public void deleteAction(String code) {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Action code is required");
+        }
+        AuditActions action = auditActionRepository.findById(code)
+                .orElseThrow(() -> new ActionNotFoundException("Action with code " + code + " not found!"));
+        action.set_deleted(true);
+        auditActionRepository.save(action);
+    }
+
+    @Transactional
+    @CacheEvict(value = "audit-actions", allEntries = true)
+    public void restoreAction(String code) {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Action code is required");
+        }
+        AuditActions action = auditActionRepository.findById(code)
+                .orElseThrow(() -> new ActionNotFoundException("Action with code " + code + " not found!"));
+        if (!action.is_deleted()) {
+            throw new ActionNotDeletedException("Action with code " + code + " is not deleted.");
+        }
+        action.set_deleted(false);
+        auditActionRepository.save(action);
+    }
+
+    @Transactional
+    @CacheEvict(value = "audit-actions", allEntries = true)
+    public void updateAction(String code, ActionEditRequest request) {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Action code is required");
+        }
+        AuditActions action = auditActionRepository.findById(code)
+                .orElseThrow(() -> new ActionNotFoundException("Action with code " + code + " not found!"));
+        if (action.is_deleted()) {
+            throw new ActionNotDeletedException("Action with code " + code + " is deleted.");
+        }
+        Optional.ofNullable(request.getTitle()).ifPresent(action::setTitle);
+        Optional.ofNullable(request.getDescription()).ifPresent(action::setDescription);
+        auditActionRepository.save(action);
+    }
+
+    public static class ActionNotFoundException extends RuntimeException {
+        public ActionNotFoundException(String message) {
+            super(message);
+        }
+    }
+
+    public static class ActionNotDeletedException extends RuntimeException {
+        public ActionNotDeletedException(String message) {
+            super(message);
+        }
+    }
+
     boolean isCategoryExists(String code) {
         return actionCategoryRepository.existsById(code);
     }
 
+    boolean isActionExists(String code) {
+        return auditActionRepository.existsById(code);
+    }
+
     public static class CategoryAlreadyExistsException extends RuntimeException {
         public CategoryAlreadyExistsException(String message) {
+            super(message);
+        }
+    }
+
+    public static class CategoryDeletedException extends RuntimeException {
+        public CategoryDeletedException(String message) {
+            super(message);
+        }
+    }
+
+    public static class ActionAlreadyExistsException extends RuntimeException {
+        public ActionAlreadyExistsException(String message) {
             super(message);
         }
     }
