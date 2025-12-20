@@ -5,11 +5,26 @@ eureka:
 server:
   port: 8081
 spring:
+  kafka:
+    bootstrap-servers: 127.0.0.1:9094
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: auth-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+    listener:
+      ack-mode: manual  
+      
   servlet:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
-
   environments:
     app-url: http://localhost:3000
     image-kit:

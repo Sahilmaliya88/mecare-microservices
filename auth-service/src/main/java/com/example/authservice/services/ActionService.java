@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import com.example.authservice.DTOS.ActionCategoryEditRequest;
@@ -13,6 +14,7 @@ import com.example.authservice.DTOS.ActionCategoryRequest;
 import com.example.authservice.DTOS.ActionEditRequest;
 import com.example.authservice.DTOS.ActionRequest;
 import com.example.authservice.DTOS.ActionResponse;
+import com.example.authservice.DTOS.AuditEvent;
 import com.example.authservice.Entities.AuditActionCategoryEntity;
 import com.example.authservice.Entities.AuditActions;
 import com.example.authservice.repositories.ActionCategoryRepository;
@@ -29,6 +31,7 @@ public class ActionService {
     private final ActionCategoryRepository actionCategoryRepository;
     private final AuditActionRepository auditActionRepository;
     private final AuditService auditService;
+    private final KafkaTemplate<String, AuditEvent> kafkaTemplate;
 
     @Transactional
     @CacheEvict(value = "audit-action-categories", allEntries = true)
@@ -51,6 +54,13 @@ public class ActionService {
 
     @Cacheable(value = "audit-action-categories", unless = "#include_deleted")
     public List<AuditActionCategoryEntity> getAllCategories(boolean include_deleted) {
+        AuditEvent auditEvent = AuditEvent.builder()
+                .type("GET_ALL_CATEGORIES")
+                .data("Not")
+                .message("null")
+                .timestamp(new Date().toString())
+                .build();
+        kafkaTemplate.send("audit-events", auditEvent);
         if (include_deleted) {
             return actionCategoryRepository.findAll();
         }

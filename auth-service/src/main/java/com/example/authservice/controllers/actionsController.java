@@ -20,6 +20,7 @@ import org.springframework.web.service.annotation.PatchExchange;
 
 import com.example.authservice.DTOS.ActionCategoryEditRequest;
 import com.example.authservice.DTOS.ActionCategoryRequest;
+import com.example.authservice.DTOS.ActionEditRequest;
 import com.example.authservice.DTOS.ActionRequest;
 import com.example.authservice.DTOS.ActionResponse;
 import com.example.authservice.Entities.AuditActionCategoryEntity;
@@ -154,6 +155,15 @@ public class actionsController {
                                 "message", "audit actions fetched successfully",
                                 "total_actions", actions.size(),
                                 "data", actions);
+                return ResponseEntity.ok(response);
+        }
+
+        @PreAuthorize("hasAnyRole('ROLE_SUPER_ADMIN','ROLE_ADMIN','ROLE_TEAM_MEMBER')")
+        @PatchExchange("/edit/{code}")
+        public ResponseEntity<?> editAction(@PathVariable @NotNull(message = "Code is required") String code,
+                        @RequestBody @Valid ActionEditRequest request) {
+                actionService.updateAction(code, request);
+                Map<String, Object> response = Map.of("status", true, "message", "Action edited successfully");
                 return ResponseEntity.ok(response);
         }
 
