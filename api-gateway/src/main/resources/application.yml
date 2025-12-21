@@ -33,7 +33,7 @@ spring:
         default-filters:
           - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
         cors-configurations:
-          '[/**]':
+          "[/**]":
             allowedOrigins:
               - "http://127.0.0.1:3000"
             allowedMethods:

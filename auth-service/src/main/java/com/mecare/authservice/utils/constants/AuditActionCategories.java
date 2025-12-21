@@ -1,0 +1,14 @@
+package com.mecare.authservice.utils.constants;
+
+public enum AuditActionCategories {
+    ADMINISTRATION,
+    APPOINTMENT_MANAGEMENT,
+    AUTHENTICATION,
+    CONTENT_MANAGEMENT,
+    DATA_ACCESS,
+    DOCTOR_VERIFICATION,
+    PAYMENT_PROCESSING,
+    PROFILE_MANAGEMENT,
+    SECURITY,
+    SYSTEM_OPERATIONS
+}
