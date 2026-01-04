@@ -1,5 +1,10 @@
 server:
   port: 8082
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
 spring:
     datasource:
         driver-class-name: org.postgresql.Driver
@@ -28,10 +33,7 @@ spring:
                 spring.json.trusted.packages: "*"
         listener:
             ack-mode: manual
-    eureka:
-        client:
-            service-url:
-                defaultZone: http://localhost:8761/eureka/
+  
 springdoc:
   api-docs:
     path: /docs

@@ -3,6 +3,7 @@ package com.example.authservice.services;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -14,9 +15,9 @@ import com.example.authservice.DTOS.ActionCategoryRequest;
 import com.example.authservice.DTOS.ActionEditRequest;
 import com.example.authservice.DTOS.ActionRequest;
 import com.example.authservice.DTOS.ActionResponse;
-import com.example.authservice.DTOS.AuditEvent;
 import com.example.authservice.Entities.AuditActionCategoryEntity;
 import com.example.authservice.Entities.AuditActions;
+import com.example.authservice.Entities.AuditLogEntity;
 import com.example.authservice.repositories.ActionCategoryRepository;
 import com.example.authservice.repositories.AuditActionRepository;
 
@@ -31,7 +32,7 @@ public class ActionService {
     private final ActionCategoryRepository actionCategoryRepository;
     private final AuditActionRepository auditActionRepository;
     private final AuditService auditService;
-    private final KafkaTemplate<String, AuditEvent> kafkaTemplate;
+    private final KafkaTemplate<String, AuditLogEntity> kafkaTemplate;
 
     @Transactional
     @CacheEvict(value = "audit-action-categories", allEntries = true)
@@ -54,11 +55,29 @@ public class ActionService {
 
     @Cacheable(value = "audit-action-categories", unless = "#include_deleted")
     public List<AuditActionCategoryEntity> getAllCategories(boolean include_deleted) {
-        AuditEvent auditEvent = AuditEvent.builder()
-                .type("GET_ALL_CATEGORIES")
-                .data("Not")
-                .message("null")
-                .timestamp(new Date().toString())
+        AuditActions action = AuditActions.builder()
+                .code("GET_ALL_CATEGORIES")
+                .title("Get All Categories")
+                .description("Get All Categories")
+                .build();
+        AuditActionCategoryEntity category = AuditActionCategoryEntity.builder()
+                .code("GET_ALL_CATEGORIES")
+                .title("Get All Categories")
+                .description("Get All Categories")
+                .build();
+        AuditLogEntity auditEvent = AuditLogEntity.builder()
+                .actor_id(UUID.fromString("00000000-0000-0000-0000-000000000000"))
+                .actor_type("System")
+                .target_id(UUID.fromString("00000000-0000-0000-0000-000000000000"))
+                .target_type("System")
+                .action_type(action)
+                .action_category(category)
+                .impersonated_user_id(null)
+                .previous_data(null)
+                .new_data(null)
+                .ip_address(null)
+                .user_agent(null)
+                .source_device(null)
                 .build();
         kafkaTemplate.send("audit-events", auditEvent);
         if (include_deleted) {
