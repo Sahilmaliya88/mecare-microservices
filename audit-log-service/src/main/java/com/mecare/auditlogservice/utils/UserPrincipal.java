@@ -1,4 +1,4 @@
-package com.mecare.audit_log_service.utils;
+package com.mecare.auditlogservice.utils;
 
 import java.util.Collection;
 import java.util.Collections;

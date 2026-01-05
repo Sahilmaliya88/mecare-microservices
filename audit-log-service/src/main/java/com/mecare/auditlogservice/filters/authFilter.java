@@ -1,4 +1,4 @@
-package com.mecare.audit_log_service.filters;
+package com.mecare.auditlogservice.filters;
 
 import java.io.IOException;
 
@@ -8,8 +8,8 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import com.mecare.audit_log_service.utils.UserEntity;
-import com.mecare.audit_log_service.utils.UserPrincipal;
+import com.mecare.auditlogservice.utils.UserEntity;
+import com.mecare.auditlogservice.utils.UserPrincipal;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

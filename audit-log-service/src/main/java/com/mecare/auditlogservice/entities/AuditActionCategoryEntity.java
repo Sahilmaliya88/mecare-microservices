@@ -1,5 +1,5 @@
 
-package com.mecare.audit_log_service.entities;
+package com.mecare.auditlogservice.entities;
 
 import java.util.Date;
 import java.util.List;

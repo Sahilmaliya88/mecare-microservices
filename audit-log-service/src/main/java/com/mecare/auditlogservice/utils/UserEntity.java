@@ -1,4 +1,4 @@
-package com.mecare.audit_log_service.utils;
+package com.mecare.auditlogservice.utils;
 
 import lombok.Builder;
 import lombok.Data;

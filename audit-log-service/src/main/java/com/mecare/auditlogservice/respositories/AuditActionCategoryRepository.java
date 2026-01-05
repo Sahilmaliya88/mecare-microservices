@@ -1,8 +1,8 @@
-package com.mecare.audit_log_service.respositories;
+package com.mecare.auditlogservice.respositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import com.mecare.audit_log_service.entities.AuditActionCategoryEntity;
+import com.mecare.auditlogservice.entities.AuditActionCategoryEntity;
 
 public interface AuditActionCategoryRepository extends JpaRepository<AuditActionCategoryEntity, String> {
 

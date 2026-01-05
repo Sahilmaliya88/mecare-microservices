@@ -53,7 +53,7 @@ public class ActionService {
         log.info("Created activity category with code: " + request.getCode());
     }
 
-    @Cacheable(value = "audit-action-categories", unless = "#include_deleted")
+    // @Cacheable(value = "audit-action-categories", unless = "#include_deleted")
     public List<AuditActionCategoryEntity> getAllCategories(boolean include_deleted) {
         AuditActions action = AuditActions.builder()
                 .code("GET_ALL_CATEGORIES")

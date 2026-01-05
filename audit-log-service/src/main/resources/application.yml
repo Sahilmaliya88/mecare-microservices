@@ -1,39 +1,41 @@
 server:
   port: 8082
+
 eureka:
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka/
 
 spring:
-    datasource:
-        driver-class-name: org.postgresql.Driver
-        url: jdbc:postgresql://127.0.0.1:5133/users
-        username: mecare
-        password: root
-    jpa:
-        database-platform: org.hibernate.dialect.PostgreSQLDialect
-        show-sql: true
-    flyway:
-        enabled: true
-        validate-on-migrate: true
-        baseline-on-migrate: true
-    kafka:
-        bootstrap-servers: 127.0.0.1:9094
-        producer:
-            acks: all
-            key-serializer: org.apache.kafka.common.serialization.StringSerializer
-            value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-        consumer:
-            group-id: audit-log-service
-            auto-offset-reset: earliest
-            key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-            value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-            properties:
-                spring.json.trusted.packages: "*"
-        listener:
-            ack-mode: manual
-  
+  kafka:
+    bootstrap-servers: 127.0.0.1:9094
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: audit-logs-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+    listener:
+      ack-mode: manual  
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://127.0.0.1:5133/users
+    username: mecare
+    password: root
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: true
+
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+    baseline-on-migrate: true
 springdoc:
   api-docs:
     path: /docs

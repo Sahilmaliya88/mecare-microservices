@@ -1,4 +1,4 @@
-package com.mecare.audit_log_service.Configs;
+package com.mecare.auditlogservice.Configs;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

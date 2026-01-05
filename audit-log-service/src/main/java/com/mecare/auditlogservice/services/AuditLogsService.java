@@ -1,10 +1,10 @@
-package com.mecare.audit_log_service.services;
+package com.mecare.auditlogservice.services;
 
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
-import com.mecare.audit_log_service.entities.AuditLogEntity;
+import com.mecare.auditlogservice.entities.AuditLogEntity;
 
 import lombok.extern.slf4j.Slf4j;
 
