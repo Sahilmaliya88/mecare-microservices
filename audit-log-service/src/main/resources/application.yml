@@ -8,17 +8,15 @@ eureka:
 
 spring:
   kafka:
-    bootstrap-servers: 127.0.0.1:9094
-    producer:
-      acks: all
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    bootstrap-servers: localhost:9094
     consumer:
       group-id: audit-logs-service
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
       properties:
+        schema.registry.url: http://localhost:8083
+        specific.avro.reader: true
         spring.json.trusted.packages: "*"
     listener:
       ack-mode: manual  

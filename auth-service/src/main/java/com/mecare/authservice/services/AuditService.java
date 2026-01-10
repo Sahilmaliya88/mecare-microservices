@@ -1,0 +1,17 @@
+package com.mecare.authservice.services;
+
+import org.springframework.stereotype.Service;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AuditService {
+
+    // public void createAuditEvent(AuditEvent auditEvent, Acknowledgment ack) {
+    // log.info("Audit event received: {}", auditEvent.getType());
+    // ack.acknowledge();
+    // }
+}
