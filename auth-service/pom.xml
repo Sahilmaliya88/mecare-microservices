@@ -187,7 +187,11 @@
             <artifactId>okio</artifactId>
             <version>3.16.4</version>
         </dependency>
-
+<dependency>
+    <groupId>com.mecare</groupId>
+    <artifactId>event-models</artifactId>
+    <version>1.0.0</version>
+</dependency>
     </dependencies>
     <repositories>
         <repository>

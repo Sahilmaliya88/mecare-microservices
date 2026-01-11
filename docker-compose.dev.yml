@@ -71,9 +71,9 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: >
-        PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093
+        PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9095,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: >
-        PLAINTEXT://localhost:9094,PLAINTEXT_HOST://kafka:9094
+        PLAINTEXT://localhost:9094,PLAINTEXT_HOST://kafka:9095
       # MAP listener names
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -98,8 +98,9 @@ services:
       - schema-registry
     environment:
       KAFKA_CLUSTERS_0_NAME: local-kafka
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9094
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9095
       KAFKA_CLUSTERS_0_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+
   schema-registry:
     image: confluentinc/cp-schema-registry:8.0.3
     container_name: schema-registry
@@ -110,4 +111,4 @@ services:
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9094
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9095

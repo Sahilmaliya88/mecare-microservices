@@ -78,12 +78,12 @@
     <version>7.6.1</version>
 </dependency>
 		<!-- DevTools -->
-		<dependency>
+		<!-- <dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>
 			<scope>runtime</scope>
 			<optional>true</optional>
-		</dependency>
+		</dependency> -->
 
 		<!-- Lombok -->
 		<dependency>
@@ -108,6 +108,11 @@
 			<artifactId>spring-kafka-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<dependency>
+    <groupId>com.mecare</groupId>
+    <artifactId>event-models</artifactId>
+    <version>1.0.0</version>
+</dependency>
 	</dependencies>
 <repositories>
     <repository>
@@ -154,25 +159,6 @@
 					</excludes>
 				</configuration>
 			</plugin>
-			<plugin>
-    <groupId>org.apache.avro</groupId>
-    <artifactId>avro-maven-plugin</artifactId>
-    <version>1.11.4</version>
-    <executions>
-        <execution>
-            <phase>generate-sources</phase>
-            <goals>
-                <goal>schema</goal>
-            </goals>
-            <configuration>
-                <sourceDirectory>${project.basedir}/src/main/resources/avro</sourceDirectory>
-                <outputDirectory>${project.basedir}/src/main/java</outputDirectory>
-                <stringType>String</stringType>
-                <enableDecimalLogicalType>true</enableDecimalLogicalType>
-            </configuration>
-        </execution>
-    </executions>
-</plugin>
 		</plugins>
 	</build>
 
