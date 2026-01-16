@@ -10,5 +10,5 @@ import com.mecare.authservice.entities.UserEntity;
 public interface UserMapper {
 
     @Mapping(source = "userProfile", target = "user_profile")
-    UsersResponse tUsersResponse(UserEntity user);
+    UsersResponse toUsersResponse(UserEntity user);
 }

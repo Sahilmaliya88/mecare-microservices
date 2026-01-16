@@ -3,6 +3,11 @@ package com.mecare.auditlogservice.entities;
 import java.util.Date;
 import java.util.UUID;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -55,9 +60,11 @@ public class AuditLogEntity {
     @JoinColumn(name = "action_category_code", referencedColumnName = "code", nullable = false)
     private AuditActionCategoryEntity action_category;
     // private String action_category_code;
-    private String impersonated_user_id;
-    private String previous_data;
-    private String new_data;
+    private UUID impersonated_user_id;
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode previous_data;
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode new_data;
     private String ip_address;
     private String user_agent;
     private String source_device;

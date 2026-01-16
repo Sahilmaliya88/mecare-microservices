@@ -30,6 +30,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -57,10 +58,12 @@ import com.mecare.authservice.entities.UserEntity;
 import com.mecare.authservice.repositories.SessionRepository;
 import com.mecare.authservice.repositories.UserRepository;
 import com.mecare.authservice.utils.DeviceInfo;
+import com.mecare.authservice.utils.enums.AuthAuditActions;
 import com.mecare.authservice.utils.enums.LoginProviders;
 import com.mecare.authservice.utils.enums.UserRoles;
 import com.mecare.authservice.utils.exceptions.Unauthorize;
 import com.mecare.authservice.utils.mappers.UserMapper;
+import com.mecare.avro.AuditLog;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
@@ -90,6 +93,7 @@ public class AuthService {
     private final RestTemplate restTemplate;
     private final SessionRepository sessionRepository;
     private final UserMapper userMapper;
+    private final KafkaTemplate<String, AuditLog> kafkaTemplate;
 
     public String registerUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
             throws JsonProcessingException {
@@ -133,7 +137,26 @@ public class AuthService {
         String jwtToken = jwtService.getJwtTokenForSession(newUser, deviceInfo.getDeviceId(), tokenVersion);
         // save user
         emailService.sendWelcomeEmail(newUser);
+        // audit log for user registration
+        AuditLog auditLog = AuditLog.newBuilder()
+                .setActorId(newUser.getId().toString())
+                .setActorType("User")
+                .setTargetId(newUser.getId().toString())
+                .setTargetType("User")
+                .setActionTypeCode(AuthAuditActions.USER_REGISTER.toString())
+                .setActionCategoryCode(AuthAuditActions.USER_REGISTER.getActionCategoryCode())
+                .setCreatedAt(Instant.now())
+                .setImpersonatedUserId(null)
+                .setNewData(Map.of("email", newUser.getEmail(), "role", newUser.getRole().toString(), "created_at",
+                        newUser.getCreated_at().toString()).toString())
+                .setPreviousData(null)
+                .setIpAddress(getClientIp(request))
+                .setUserAgent(request.getHeader("User-Agent"))
+                .setSourceDevice(deviceInfo.getDeviceId())
+                .build();
+        kafkaTemplate.send("audit-log-service", auditLog);
         // return response
+
         return jwtToken;
     }
 
@@ -236,7 +259,29 @@ public class AuthService {
         redisTemplate.opsForHash().put(
                 VERSION_PREFIX + userEntity.getId(), deviceInfo.getDeviceId(),
                 tokenVersion);
-
+        //
+        AuditLog auditLog = AuditLog.newBuilder()
+                .setActorId(userEntity.getId().toString())
+                .setActorType("User")
+                .setTargetId(userEntity.getId().toString())
+                .setTargetType("User")
+                .setActionTypeCode(AuthAuditActions.USER_LOGIN.toString())
+                .setActionCategoryCode(AuthAuditActions.USER_LOGIN.getActionCategoryCode())
+                .setCreatedAt(Instant.now())
+                .setImpersonatedUserId(null)
+                .setNewData(
+                        Map.of(
+                                "userId", userEntity.getId().toString(),
+                                "loginProvider", userEntity.getProvider().toString(),
+                                "loginResult", "SUCCESS",
+                                "roles", userEntity.getRole().toString(),
+                                "device_id", deviceInfo.getDeviceId()).toString())
+                .setPreviousData(null)
+                .setIpAddress(getClientIp(request))
+                .setUserAgent(request.getHeader("User-Agent"))
+                .setSourceDevice(deviceInfo.getDeviceId())
+                .build();
+        kafkaTemplate.send("audit-events", auditLog);
         return jwtService.getJwtTokenForSession(userEntity, deviceInfo.getDeviceId(), tokenVersion);
     }
 
@@ -922,7 +967,7 @@ public class AuthService {
         UserEntity user = userRepository.findUserById(id)
                 .orElseThrow(() -> new UserNotfoundException("User not found with email: " + id));
 
-        UsersResponse userResponse = userMapper.tUsersResponse(user);
+        UsersResponse userResponse = userMapper.toUsersResponse(user);
         if (userResponse == null) {
             throw new UserNotfoundException("User not found with id: " + id);
         }

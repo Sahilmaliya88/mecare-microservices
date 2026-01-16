@@ -65,7 +65,7 @@ public class ActionService {
                 .setActionCategoryCode("APPOINTMENT_MANAGEMENT")
                 .setImpersonatedUserId(null)
                 .setPreviousData(null)
-                .setNewData("{\"status\":\"CONFIRMED\"}")
+                .setNewData(null)
                 .setIpAddress("192.168.1.10")
                 .setUserAgent("Mozilla/5.0")
                 .setSourceDevice("WEB")
