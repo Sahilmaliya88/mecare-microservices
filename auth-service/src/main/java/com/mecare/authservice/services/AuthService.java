@@ -43,6 +43,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mecare.authservice.DTOS.ChangePasswordRequest;
 import com.mecare.authservice.DTOS.ChangeUserRoleRequest;
 import com.mecare.authservice.DTOS.GoogleUserProfileResponse;
@@ -94,6 +95,7 @@ public class AuthService {
     private final SessionRepository sessionRepository;
     private final UserMapper userMapper;
     private final KafkaTemplate<String, AuditLog> kafkaTemplate;
+    private final ObjectMapper objectMapper;
 
     public String registerUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
             throws JsonProcessingException {
@@ -260,6 +262,13 @@ public class AuthService {
                 VERSION_PREFIX + userEntity.getId(), deviceInfo.getDeviceId(),
                 tokenVersion);
         //
+        String new_data = objectMapper.writeValueAsString(
+                Map.of(
+                        "userId", userEntity.getId().toString(),
+                        "loginProvider", userEntity.getProvider().toString(),
+                        "loginResult", "SUCCESS",
+                        "roles", userEntity.getRole().toString(),
+                        "device_id", deviceInfo.getDeviceId()));
         AuditLog auditLog = AuditLog.newBuilder()
                 .setActorId(userEntity.getId().toString())
                 .setActorType("User")
@@ -270,12 +279,7 @@ public class AuthService {
                 .setCreatedAt(Instant.now())
                 .setImpersonatedUserId(null)
                 .setNewData(
-                        Map.of(
-                                "userId", userEntity.getId().toString(),
-                                "loginProvider", userEntity.getProvider().toString(),
-                                "loginResult", "SUCCESS",
-                                "roles", userEntity.getRole().toString(),
-                                "device_id", deviceInfo.getDeviceId()).toString())
+                        new_data)
                 .setPreviousData(null)
                 .setIpAddress(getClientIp(request))
                 .setUserAgent(request.getHeader("User-Agent"))
