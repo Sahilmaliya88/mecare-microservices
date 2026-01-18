@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
@@ -27,7 +28,7 @@ public class AuditLogsService {
     private final AuditLogRespository auditLogRepository;
     private final AuditActionsRespository auditActionsRespository;
     private final ObjectMapper objectMapper;
-
+    private final AuditLogActionService auditLogActionService;
     @KafkaListener(topics = "audit-events", groupId = "audit-log-service")
     public void saveAuditLog(ConsumerRecord<String, AuditLog> record, Acknowledgment acknowledgment) {
         try {
@@ -35,7 +36,7 @@ public class AuditLogsService {
             JsonNode newData = auditLog.getNewData() == null ? null : objectMapper.readTree(auditLog.getNewData());
             JsonNode previousData = auditLog.getPreviousData() == null ? null
                     : objectMapper.readTree(auditLog.getPreviousData());
-            AuditActions actionType = getAuditActions(auditLog.getActionTypeCode());
+            AuditActions actionType = auditLogActionService.getAuditActions(auditLog.getActionTypeCode());
             UUID impersonatedUserId = auditLog.getImpersonatedUserId() == null ? null
                     : UUID.fromString(auditLog.getImpersonatedUserId());
             log.info("Audit log saved: {}",
@@ -64,8 +65,4 @@ public class AuditLogsService {
         }
     }
 
-    public AuditActions getAuditActions(String actionTypeCode) {
-        return auditActionsRespository.findById(actionTypeCode)
-                .orElseThrow(() -> new RuntimeException("Audit action not found"));
-    }
 }

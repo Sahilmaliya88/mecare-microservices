@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.mecare.authservice.entities.AuditActions;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -96,7 +97,7 @@ public class AuthService {
     private final UserMapper userMapper;
     private final KafkaTemplate<String, AuditLog> kafkaTemplate;
     private final ObjectMapper objectMapper;
-
+    private final AuditService auditService;
     public String registerUser(RegisterUserRequest registerUserRequest, HttpServletRequest request)
             throws JsonProcessingException {
         String hashedPassword = passwordEncoder.encode(registerUserRequest.getPassword());
@@ -140,23 +141,24 @@ public class AuthService {
         // save user
         emailService.sendWelcomeEmail(newUser);
         // audit log for user registration
-        AuditLog auditLog = AuditLog.newBuilder()
-                .setActorId(newUser.getId().toString())
-                .setActorType("User")
-                .setTargetId(newUser.getId().toString())
-                .setTargetType("User")
-                .setActionTypeCode(AuthAuditActions.USER_REGISTER.toString())
-                .setActionCategoryCode(AuthAuditActions.USER_REGISTER.getActionCategoryCode())
-                .setCreatedAt(Instant.now())
-                .setImpersonatedUserId(null)
-                .setNewData(Map.of("email", newUser.getEmail(), "role", newUser.getRole().toString(), "created_at",
-                        newUser.getCreated_at().toString()).toString())
-                .setPreviousData(null)
-                .setIpAddress(getClientIp(request))
-                .setUserAgent(request.getHeader("User-Agent"))
-                .setSourceDevice(deviceInfo.getDeviceId())
-                .build();
-        kafkaTemplate.send("audit-log-service", auditLog);
+        Map<String,String> new_data = Map.of("email", newUser.getEmail(), "role", newUser.getRole().toString(), "created_at",
+                newUser.getCreated_at().toString());
+        auditService.sendAuditLog(
+                newUser.getId(),
+                newUser.getRole().toString(),
+                newUser.getId(),
+                newUser.getRole().toString(),
+                AuthAuditActions.USER_REGISTER.toString(),
+                AuthAuditActions.USER_REGISTER.getActionCategoryCode(),
+                Instant.now(),
+                getImpersonateByUser(request),
+                new_data,
+                null,
+                getClientIp(request),
+                request.getHeader("USER-AGENT"),
+                deviceInfo.getDeviceId()
+
+        );
         // return response
 
         return jwtToken;
@@ -196,6 +198,23 @@ public class AuthService {
         redisTemplate.opsForHash().put(VERSION_PREFIX + userEntity.getId(), session.getDeviceId(),
                 tokenVersion);
         userRepository.save(userEntity);
+        //audit log
+        auditService.sendAuditLog(
+                userEntity.getId(),
+                userEntity.getRole().toString(),
+                userEntity.getId(),
+                userEntity.getRole().toString(),
+                AuthAuditActions.VERIFY_USER.toString(),
+                AuthAuditActions.VERIFY_USER.getActionCategoryCode(),
+                Instant.now(),
+                getImpersonateByUser(request),
+                null,
+                null,
+                getClientIp(request),
+                request.getHeader("USER-AGENT"),
+                verifyRequest.getDeviceId()
+        );
+
         return jwtService.getJwtTokenForSession(userEntity, verifyRequest.getDeviceId(), tokenVersion);
     }
 
@@ -261,31 +280,29 @@ public class AuthService {
         redisTemplate.opsForHash().put(
                 VERSION_PREFIX + userEntity.getId(), deviceInfo.getDeviceId(),
                 tokenVersion);
-        //
-        String new_data = objectMapper.writeValueAsString(
+        Map<String,String> new_data =
                 Map.of(
                         "userId", userEntity.getId().toString(),
                         "loginProvider", userEntity.getProvider().toString(),
                         "loginResult", "SUCCESS",
                         "roles", userEntity.getRole().toString(),
-                        "device_id", deviceInfo.getDeviceId()));
-        AuditLog auditLog = AuditLog.newBuilder()
-                .setActorId(userEntity.getId().toString())
-                .setActorType("User")
-                .setTargetId(userEntity.getId().toString())
-                .setTargetType("User")
-                .setActionTypeCode(AuthAuditActions.USER_LOGIN.toString())
-                .setActionCategoryCode(AuthAuditActions.USER_LOGIN.getActionCategoryCode())
-                .setCreatedAt(Instant.now())
-                .setImpersonatedUserId(null)
-                .setNewData(
-                        new_data)
-                .setPreviousData(null)
-                .setIpAddress(getClientIp(request))
-                .setUserAgent(request.getHeader("User-Agent"))
-                .setSourceDevice(deviceInfo.getDeviceId())
-                .build();
-        kafkaTemplate.send("audit-events", auditLog);
+                        "device_id", deviceInfo.getDeviceId());
+        auditService.sendAuditLog(
+                userEntity.getId(),
+                userEntity.getRole().toString(),
+                userEntity.getId(),
+                userEntity.getRole().toString(),
+                AuthAuditActions.USER_LOGIN.toString(),
+                     AuthAuditActions.USER_LOGIN.getActionCategoryCode(),
+                Instant.now(),
+                     null,
+                new_data,
+                null,
+                getClientIp(request),
+                request.getHeader("User-Agent"),
+                deviceInfo.getDeviceId()
+                
+        );
         return jwtService.getJwtTokenForSession(userEntity, deviceInfo.getDeviceId(), tokenVersion);
     }
 
@@ -317,7 +334,7 @@ public class AuthService {
      * throws Unauthorize if the user is not authenticated or the email is invalid
      * also can throw mail error
      */
-    public void sendVerificationCode() {
+    public void sendVerificationCode(HttpServletRequest request) throws JsonProcessingException {
         UserEntity user = getAuthenticatedUser();
         // Generate OTP and set expiration
         if (user.getIs_verified()) {
@@ -325,6 +342,8 @@ public class AuthService {
         }
         String verificationCode = generateOtp(OTP_LENGTH);
         Instant expiryTime = Instant.now().plus(OTP_EXPIRY_MINUTES, ChronoUnit.MINUTES);
+        String prevVerificationCode = user.getVerification_code();
+        String prevExpiryTime = user.getVerification_code_expires_at().toString();
         // Update user entity
         user.setVerification_code(verificationCode);
         user.setVerification_code_expires_at(Date.from(expiryTime));
@@ -339,11 +358,27 @@ public class AuthService {
         // Send verification email
         try {
             emailService.sendVerificationCodeEmail(user);
+            auditService.sendAuditLog(
+                    user.getId(),
+                    user.getRole().toString(),
+                    user.getId(),
+                    user.getRole().toString(),
+                    AuthAuditActions.SEND_VERIFICATION_CODE.toString(),
+                    AuthAuditActions.SEND_VERIFICATION_CODE.getActionCategoryCode(),
+                    Instant.now(),
+                    getImpersonateByUser(request),
+                    Map.of("verification_code",user.getVerification_code(),"expires_at",user.getVerification_code_expires_at().toString()),
+                    Map.of("verification_code",prevVerificationCode,"expires_at",prevExpiryTime),
+                    getClientIp(request),
+                    request.getHeader("User-Agent"),
+                    request.getHeader(DEVICE_ID_HEADER)
+            );
             log.info("Verification code sent to {}", user.getEmail());
         } catch (EmailService.EmailSendingException e) {
             log.error("Failed to send verification email to {}: {}", user.getEmail(), e.getMessage(), e);
             throw e;
         }
+
     }
 
     /**
@@ -355,7 +390,7 @@ public class AuthService {
      *                               provided email
      *
      */
-    public void sendPasswordResetLink(String email) {
+    public void sendPasswordResetLink(String email,HttpServletRequest request) throws JsonProcessingException {
         UserEntity userEntity = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotfoundException("User not found with email: " + email));
         // generate a string
@@ -370,6 +405,21 @@ public class AuthService {
         // send verification code
         emailService.sendPasswordResetLink(userEntity);
         userRepository.save(userEntity);
+        //audit-log
+        auditService.sendAuditLog(
+                userEntity.getId(),
+                userEntity.getRole().toString(),
+                userEntity.getId(),
+                userEntity.getRole().toString(),
+                AuthAuditActions.FORGOT_PASSWORD_REQUEST.toString(),
+                AuthAuditActions.FORGOT_PASSWORD_REQUEST.getActionCategoryCode(),
+                Instant.now(),
+                null,
+                null,
+                null,
+                getClientIp(request),
+                request.getHeader("User-Agent"),
+                request.getHeader(DEVICE_ID_HEADER));
     }
 
     /**
@@ -381,7 +431,7 @@ public class AuthService {
      * @throws IllegalArgumentException if body is empty
      * @throws RuntimeException         if failed to save in database
      */
-    public void changePassword(String token, ResetPasswordRequest resetPasswordRequest) {
+    public void changePassword(String token, ResetPasswordRequest resetPasswordRequest, HttpServletRequest request) {
         UserEntity user = userRepository.findByValidPasswordResetToken(token, new Date())
                 .orElseThrow(() -> new InvalidTokenException("Token is Invalid or expired!"));
         if (resetPasswordRequest.getPassword() == null) {
@@ -399,10 +449,27 @@ public class AuthService {
         redisTemplate.delete(VERSION_PREFIX + user.getId());
         sessionRepository.deleteAllByUser(user);
         try {
+            //audit-log
+            auditService.sendAuditLog(
+                    user.getId(),
+                user.getRole().toString(),
+                user.getId(),
+                user.getRole().toString(),
+                    AuthAuditActions.RESET_PASSWORD.toString(),
+                    AuthAuditActions.RESET_PASSWORD.getActionCategoryCode(),
+                    Instant.now(),
+                    null,
+                null,
+                null,
+                    getClientIp(request),
+                request.getHeader("User-Agent"),
+                request.getHeader(DEVICE_ID_HEADER)
+            );
             userRepository.save(user);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+
     }
 
     /**
@@ -425,7 +492,7 @@ public class AuthService {
      * fetches user profile from Google using access token
      * register user if not exists or returns jwt token if user exists
      * 
-     * @param accessToken {@link String} access token for Google apis
+     * @param socialLoginRequest  social login details
      * @throws InvalidLoginTypeException if user tries to log in with different
      *                                   provider than registered
      * @throws IllegalArgumentException  if access token is missing
@@ -501,6 +568,21 @@ public class AuthService {
                 }
                 redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceInfo.getDeviceId(), tokenVersion);
                 // generate jwt and save user
+                auditService.sendAuditLog(
+                        user.getId(),
+                        user.getRole().toString(),
+                        user.getId(),
+                        user.getRole().toString(),
+                        AuthAuditActions.SOCIAL_LOGIN.toString(),
+                        AuthAuditActions.SOCIAL_LOGIN.getActionCategoryCode(),
+                        Instant.now(),
+                        getImpersonateByUser(request),
+                        null,
+                        null,
+                        getClientIp(request),
+                        request.getHeader("User-Agent"),
+                        deviceInfo.getDeviceId()
+                );
                 return jwtService.getJwtTokenForSession(user, deviceInfo.getDeviceId(), tokenVersion);
             } else {
                 String tokenVersion = String.valueOf(ThreadLocalRandom.current().nextLong());
@@ -527,6 +609,26 @@ public class AuthService {
                         .build();
                 sessionRepository.save(loginSession);
                 redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceInfo.getDeviceId(), tokenVersion);
+                auditService.sendAuditLog(
+                        user.getId(),
+                        user.getRole().toString(),
+                        user.getId(),
+                        user.getRole().toString(),
+                        AuthAuditActions.USER_REGISTER.toString(),
+                        AuthAuditActions.USER_REGISTER.getActionCategoryCode(),
+                        Instant.now(),
+                        getImpersonateByUser(request),
+                        Map.of(
+                                "email", user.getEmail(),
+                                "role", user.getRole().toString(),
+                                "provider",user.getProvider(),
+                            "created_at",user.getCreated_at()
+                        ),
+                        null,
+                        getClientIp(request),
+                        request.getHeader("User-Agent"),
+                        deviceInfo.getDeviceId()
+                );
                 return jwtService.getJwtTokenForSession(user, deviceInfo.getDeviceId(), tokenVersion);
             }
         } catch (RestClientException e) {
@@ -568,6 +670,8 @@ public class AuthService {
             if (!isPermitted) {
                 throw new Unauthorize("you are unauthorized to perform this action");
             }
+            //
+            UserRoles prevRole = user.getRole();
             user.setRole(changeUserRoleRequest.getUserRole());
             user.setUpdated_at(new Date());
             try {
@@ -582,7 +686,21 @@ public class AuthService {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-
+            auditService.sendAuditLog(
+                    operator.getId(),
+                    operator.getRole().toString(),
+                    user.getId(),
+                    user.getRole().toString(),
+                    AuthAuditActions.CHANGE_USER_ROLE.toString(),
+                    AuthAuditActions.CHANGE_USER_ROLE.getActionCategoryCode(),
+                    Instant.now(),
+                    getImpersonateByUser(request),
+                    Map.of("new_role", user.getRole().toString()),
+                    Map.of("prev_role", prevRole.toString()),
+                    getClientIp(request),
+                    request.getHeader("User-Agent"),
+                    deviceId
+            );
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -622,6 +740,8 @@ public class AuthService {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+            reader.close();
+            csvRecord.close();
             return users.size();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -676,6 +796,22 @@ public class AuthService {
         ListOperations<String, Object> listOps = redisTemplate.opsForList();
         String Key = IMPERSONATE_PREFIX + targetUser.getEmail();
         listOps.rightPush(Key, tokenVersion);
+        //audit log
+        auditService.sendAuditLog(
+                performer.getId(),
+                performer.getRole().toString(),
+                targetUser.getId(),
+                targetUser.getRole().toString(),
+                AuthAuditActions.START_IMPERSONATION.toString(),
+                AuthAuditActions.START_IMPERSONATION.getActionCategoryCode(),
+                Instant.now(),
+                getImpersonateByUser(request),
+                null,
+                null,
+                getClientIp(request),
+                request.getHeader("User-Agent"),
+                deviceId
+        );
         return updatedToken;
     }
 
@@ -756,6 +892,22 @@ public class AuthService {
         log.info("deactivated {} sessions", deactivedSessionCount);
         sessionRepository.save(actualSession);
         redisTemplate.opsForHash().put(VERSION_PREFIX + user.getId(), deviceId, newTokenVersion);
+        // audit log
+        auditService.sendAuditLog(
+                user.getId(),
+                user.getRole().toString(),
+                impersonatedUser.getId(),
+                impersonatedUser.getRole().toString(),
+                AuthAuditActions.END_IMPERSONATION.toString(),
+                AuthAuditActions.END_IMPERSONATION.getActionCategoryCode(),
+                Instant.now(),
+                getImpersonateByUser(request),
+                null,
+                null,
+                getClientIp(request),
+                request.getHeader("User-Agent"),
+                deviceId
+        );
         return jwtService.getJwtTokenForSession(user, deviceId, newTokenVersion);
     }
 
@@ -774,7 +926,7 @@ public class AuthService {
      */
     public String updatePassword(ChangePasswordRequest changePasswordRequest, HttpServletRequest request) {
         if (changePasswordRequest.getNewPassword().isEmpty() || changePasswordRequest.getOldPassword().isEmpty()) {
-            throw new IllegalArgumentException("Invalid argumets");
+            throw new IllegalArgumentException("Invalid arguments");
         }
         String deviceId = request.getHeader(DEVICE_ID_HEADER);
         if (deviceId == null || deviceId.isBlank()) {
@@ -828,6 +980,22 @@ public class AuthService {
         }
         try {
             userRepository.save(user);
+            //audit-log
+            auditService.sendAuditLog(
+                    user.getId(),
+                    user.getRole().toString(),
+                    user.getId(),
+                    user.getRole().toString(),
+                    AuthAuditActions.CHANGE_PASSWORD.toString(),
+                    AuthAuditActions.CHANGE_PASSWORD.getActionCategoryCode(),
+                    Instant.now(),
+                    getImpersonateByUser(request),
+                    null,
+                    null,
+                    getClientIp(request),
+                    request.getHeader("User-Agent"),
+                    deviceId
+            );
             return jwtService.getJwtTokenForSession(user, deviceId, tokenVersion);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -847,7 +1015,7 @@ public class AuthService {
      * @throws UserNotfoundException    if no user is found with the provided email.
      * @throws RuntimeException         if any database operation fails.
      */
-    public void deleteUserByEmail(String email, boolean hardDelete) {
+    public void deleteUserByEmail(String email, boolean hardDelete,HttpServletRequest request) {
         if (email == null || email.isEmpty()) {
             throw new IllegalArgumentException("Invalid parameters");
         }
@@ -877,7 +1045,24 @@ public class AuthService {
                 userRepository.save(targetUser);
             }
             String USER_VERSION_KEY = VERSION_PREFIX + targetUser.getId();
+
             sessionRepository.deleteAllByUser(targetUser);
+            //audit-log
+            auditService.sendAuditLog(
+                    performer.getId(),
+                    performer.getRole().toString(),
+                    targetUser.getId(),
+                    targetUser.getRole().toString(),
+                    AuthAuditActions.DELETE_USER.toString(),
+                    AuthAuditActions.DELETE_USER.getActionCategoryCode(),
+                    Instant.now(),
+                    getImpersonateByUser(request),
+                    null,
+                    null,
+                    getClientIp(request),
+                    request.getHeader("User-Agent"),
+                    request.getHeader(DEVICE_ID_HEADER)
+            );
             redisTemplate.delete(USER_VERSION_KEY);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -896,7 +1081,7 @@ public class AuthService {
      *                                  invalid.
      * @throws RuntimeException         if any database or Redis operation fails.
      */
-    public void logoutUser(HttpServletRequest request, boolean allDevices) {
+    public void logoutUser(HttpServletRequest request, boolean allDevices) throws JsonProcessingException {
         UserEntity user = getAuthenticatedUser();
         if (user == null) {
             throw new Unauthorize("Please login!");
@@ -923,7 +1108,22 @@ public class AuthService {
         }
         int deactivedSessionCount = sessionRepository.deActiveSessionByUserAndDeviceId(user, deviceId);
         log.info("deactivated {} sessions", deactivedSessionCount);
-
+        //audit-log
+        auditService.sendAuditLog(
+                user.getId(),
+                user.getRole().toString(),
+                user.getId(),
+                user.getRole().toString(),
+                AuthAuditActions.USER_LOGOUT.toString(),
+                AuthAuditActions.USER_LOGOUT.getActionCategoryCode(),
+                Instant.now(),
+                getImpersonateByUser(request),
+                Map.of("all_devices", allDevices),
+                null,
+                getClientIp(request),
+                request.getHeader("User-Agent"),
+                deviceId
+        );
     }
 
     // var users = authService.getAllUsers(role, search, page, size, sort_by,
@@ -1067,6 +1267,9 @@ public class AuthService {
         return otp.toString();
     }
 
+    private String getImpersonateByUser(HttpServletRequest request){
+       return  request.getHeader(IMPERSONATE_BY);
+    }
     /**
      * A custom exception to user if already verified and sends verification code
      * request

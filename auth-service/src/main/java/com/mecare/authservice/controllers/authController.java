@@ -114,8 +114,8 @@ public class authController {
         @PreAuthorize("isAuthenticated()")
         @ApiResponse(responseCode = "200", description = "Verification code sent", content = @Content(schema = @Schema(type = "object", example = "{ \"status\": true, \"message\": \"Verification sent!.please check email.\" }")))
         @GetMapping("/get-verification-code")
-        public ResponseEntity<?> getVerificationCode() {
-                authService.sendVerificationCode();
+        public ResponseEntity<?> getVerificationCode(HttpServletRequest request) throws JsonProcessingException {
+                authService.sendVerificationCode(request);
                 return ResponseEntity.of(Optional
                                 .of(Map.of("status", true, "message", "Verification sent!.please check email.")));
         }
@@ -123,9 +123,9 @@ public class authController {
         @Operation(summary = "Forgot password", description = "Send a password reset link to the provided email.")
         @ApiResponse(responseCode = "200", description = "Password reset link sent", content = @Content(schema = @Schema(type = "object", example = "{ \"status\": true, \"message\": \"Password reset link sent successfully!\" }")))
         @GetMapping("/forgot-password/{email}")
-        public ResponseEntity<?> forgotPasswordLink(
-                        @Parameter(description = "Email address of the user") @PathVariable String email) {
-                authService.sendPasswordResetLink(email);
+        public ResponseEntity<?> forgotPasswordLink(HttpServletRequest request,
+                        @Parameter(description = "Email address of the user") @PathVariable String email) throws JsonProcessingException {
+                authService.sendPasswordResetLink(email,request);
                 return ResponseEntity
                                 .ok(Map.of("status", "true",
                                                 "message", "Password reset link sent successfully!"));
@@ -135,9 +135,10 @@ public class authController {
         @ApiResponse(responseCode = "200", description = "Password reset successfully", content = @Content(schema = @Schema(type = "object", example = "{ \"status\": true, \"message\": \"Password changed successfully, Please login again\" }")))
         @PatchMapping("/reset-password/{token}")
         public ResponseEntity<?> resetPassword(
+                HttpServletRequest request,
                         @Parameter(description = "Reset token") @PathVariable @NotNull String token,
                         @RequestBody ResetPasswordRequest resetPasswordRequest) {
-                authService.changePassword(token, resetPasswordRequest);
+                authService.changePassword(token, resetPasswordRequest,request);
                 return ResponseEntity.ok(
                                 Map.of("status", true, "message", "Password changed successfully, Please login again"));
         }
@@ -233,9 +234,9 @@ public class authController {
         }
 
         @DeleteMapping("/{email}/delete")
-        public ResponseEntity<Map<String, Object>> deleteUser(@PathVariable @Email String email,
+        public ResponseEntity<Map<String, Object>> deleteUser(HttpServletRequest request,@PathVariable @Email String email,
                         @RequestParam(required = false) boolean hardDelete) {
-                authService.deleteUserByEmail(email, hardDelete);
+                authService.deleteUserByEmail(email, hardDelete,request);
                 Map<String, Object> response = Map.of("status", true, "message", "user deleted successfully");
                 return ResponseEntity.ok(response);
         }
@@ -252,7 +253,7 @@ public class authController {
         @PreAuthorize("isAuthenticated()")
         @DeleteMapping("/logout")
         public ResponseEntity<Map<String, Object>> logoutUser(HttpServletRequest request,
-                        @RequestParam(required = false) boolean all_device) {
+                        @RequestParam(required = false) boolean all_device) throws JsonProcessingException {
                 authService.logoutUser(request, all_device);
                 Map<String, Object> response = Map.of("status", true, "message", "logged out successfully");
                 return ResponseEntity.ok(response);

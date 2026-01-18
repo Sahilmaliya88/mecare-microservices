@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ExternalStorageConfigurationManager" enabled="true" />
-  <component name="KubernetesApiProvider"><![CDATA[{}]]></component>
+  <component name="KubernetesApiProvider">{}</component>
   <component name="MavenProjectsManager">
     <option name="originalFiles">
       <list>
         <option value="$PROJECT_DIR$/api-gateway/pom.xml" />
         <option value="$PROJECT_DIR$/service-registry/pom.xml" />
         <option value="$PROJECT_DIR$/auth-service/pom.xml" />
+        <option value="$PROJECT_DIR$/audit-log-service/pom.xml" />
+        <option value="$PROJECT_DIR$/event-models/pom.xml" />
       </list>
     </option>
   </component>
